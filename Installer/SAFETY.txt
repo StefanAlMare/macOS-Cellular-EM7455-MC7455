@@ -1,0 +1,14 @@
+CELLULAR 2.6.1 STABLE TIMED
+
+Baza functionala: Cellular v2.6.
+Regresia FAST v2.7 (skip preflight / polling 250 ms / eliminare IP query)
+NU este prezenta.
+
+Singurele schimbari operationale:
+- Auto fallback 5s -> 1s
+- operator AT nu este reinterogat daca providerul este deja cunoscut
+
+Instrumentarea de timing foloseste numai clock_gettime + printf.
+
+Engine SHA256:
+8b3a8396399979c21cc39aebdae5271548352423ff14485d753a14d0d03133f3

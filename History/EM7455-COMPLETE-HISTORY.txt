@@ -1,0 +1,4346 @@
+ioreg -l -w0 | grep -i -E 'WWAN|QMI|MBIM|Sierra|EM7455' | head -200\
+\
+echo\
+echo "========== NETWORK PORTS =========="\
+networksetup -listallhardwareports\
+\
+echo\
+echo "========== NETWORK SERVICES =========="\
+networksetup -listallnetworkservices\
+\
+echo\
+echo "========== KEXT / DRIVER LOADED =========="\
+kmutil showloaded 2>/dev/null | grep -Ei 'WWAN|QMI|Sierra|CellPhone|MBIM'\
+\
+echo\
+echo "========== COMPONENTE WWAN APPLE =========="\
+find /System/Library \\
+     \( -iname '*WWAN*' -o -iname '*QMI*' -o -iname '*Sierra*' -o -iname '*CellPhone*' -o -iname '*MBIM*' \) \\
+     2>/dev/null | head -200\
+\
+echo\
+echo "========== WWAN MENU =========="\
+find /System/Library/CoreServices -iname 'WWAN.menu' -print 2>/dev/null\
+\
+echo\
+echo "========== USB DRIVER EXTENSIONS =========="\
+find /System/Library/DriverExtensions \\
+     \( -iname '*USB*' -o -iname '*Network*' -o -iname '*Ethernet*' \) \\
+     2>/dev/null | head -100
+echo "========== EM7455 - INTERFETE USB =========="\
+ioreg -p IOUSB -w0 -l | \\
+grep -A260 'EM7455@14a00000' | \\
+grep -E 'EM7455@|IOUSBHostInterface|bInterfaceNumber|bInterfaceClass|bInterfaceSubClass|bInterfaceProtocol|USB Product Name|USB Vendor Name|idVendor|idProduct' | \\
+head -120\
+\
+echo\
+echo "========== PORTURI SERIAL =========="\
+ls -1 /dev/cu.* /dev/tty.* 2>/dev/null | \\
+grep -Ei 'usb|sierra|wwan|modem|serial' || echo "NICIUN PORT SERIAL SIERRA"\
+\
+echo\
+echo "========== IOSerialBSDClient =========="\
+ioreg -r -c IOSerialBSDClient -l -w0 | \\
+grep -Ei 'Sierra|EM7455|USB|WWAN|Modem|IODialinDevice|IOCalloutDevice' || true\
+\
+echo\
+echo "========== DRIVERE ASOCIATE =========="\
+kmutil showloaded 2>/dev/null | \\
+grep -Ei 'Sierra|QMI|WWAN|MBIM|USBSerial|IOSerial' || true\
+\
+echo\
+echo "========== SYSTEM EXTENSIONS =========="\
+systemextensionsctl list 2>/dev/null\
+\
+echo\
+echo "========== APPLE USB SERIAL DEXT =========="\
+plutil -p /System/Library/DriverExtensions/com.apple.DriverKit-AppleUSBSerial.dext/Contents/Info.plist 2>/dev/null | \\
+grep -Ei -C3 'Vendor|Product|Interface|USB|1199|9071|4505|36977'
+echo "========== ARBORE EM7455 =========="\
+ioreg -p IOUSB -w0 | \\
+sed -n '/EM7455@14a00000/,/2.4G Mouse@14400000/p'\
+\
+echo\
+echo "========== INTERFETE EM7455 =========="\
+ioreg -w0 -rc IOUSBHostInterface -l | \\
+grep -i -B4 -A35 -E 'EM7455|Sierra Wireless'\
+\
+echo\
+echo "========== DESCRIPTORI INTERFETE =========="\
+ioreg -w0 -rc IOUSBHostInterface -l | \\
+grep -E 'EM7455@|bInterfaceNumber|bAlternateSetting|bInterfaceClass|bInterfaceSubClass|bInterfaceProtocol|bNumEndpoints|idVendor|idProduct' | \\
+head -250
+echo "========== PPP =========="\
+command -v pppd || true\
+ls -l /usr/sbin/pppd 2>/dev/null || true\
+pppd --version 2>&1 | head -5\
+\
+echo\
+echo "========== NETWORKSETUP PPP =========="\
+networksetup -help 2>&1 | grep -i -E 'ppp|pppoe' | head -30\
+\
+echo\
+echo "========== HOMEBREW =========="\
+command -v brew || true\
+brew --version 2>/dev/null | head -2\
+\
+echo\
+echo "========== LIBUSB =========="\
+if command -v brew >/dev/null; then\
+    brew list --versions libusb 2>/dev/null || echo "libusb NU este instalat"\
+fi\
+\
+echo\
+echo "========== COMPILATOR =========="\
+clang --version | head -2\
+\
+echo\
+echo "========== PYTHON =========="\
+python3 --version
+brew install libusb
+mkdir -p /tmp/em7455-test\
+cd /tmp/em7455-test\
+\
+cat > em7455_diag.c <<'EOF'\
+#include <stdio.h>\
+#include <libusb.h>\
+\
+static const char *xtype(unsigned char a)\
+{\
+    switch (a & LIBUSB_TRANSFER_TYPE_MASK) {\
+        case LIBUSB_TRANSFER_TYPE_CONTROL: return "CONTROL";\
+        case LIBUSB_TRANSFER_TYPE_ISOCHRONOUS: return "ISO";\
+        case LIBUSB_TRANSFER_TYPE_BULK: return "BULK";\
+        case LIBUSB_TRANSFER_TYPE_INTERRUPT: return "INTERRUPT";\
+        default: return "?";\
+    }\
+}\
+\
+int main(void)\
+{\
+    libusb_context *ctx = NULL;\
+    libusb_device **list = NULL;\
+    libusb_device_handle *h = NULL;\
+\
+    int r = libusb_init(&ctx);\
+    if (r < 0) {\
+        fprintf(stderr, "libusb_init: %s\n", libusb_error_name(r));\
+        return 1;\
+    }\
+\
+    ssize_t n = libusb_get_device_list(ctx, &list);\
+\
+    for (ssize_t i = 0; i < n; i++) {\
+        struct libusb_device_descriptor dd;\
+\
+        if (libusb_get_device_descriptor(list[i], &dd) != 0)\
+            continue;\
+\
+        if (dd.idVendor != 0x1199 || dd.idProduct != 0x9071)\
+            continue;\
+\
+        printf("EM7455 GASIT: %04x:%04x\n\n",\
+               dd.idVendor, dd.idProduct);\
+\
+        struct libusb_config_descriptor *cfg = NULL;\
+\
+        if (libusb_get_active_config_descriptor(list[i], &cfg) != 0) {\
+            printf("Nu pot citi configuratia activa\n");\
+            continue;\
+        }\
+\
+        for (int j = 0; j < cfg->bNumInterfaces; j++) {\
+            const struct libusb_interface *itf = &cfg->interface[j];\
+\
+            for (int a = 0; a < itf->num_altsetting; a++) {\
+                const struct libusb_interface_descriptor *id =\
+                    &itf->altsetting[a];\
+\
+                printf("IF %2u ALT %u  class=%02x subclass=%02x proto=%02x endpoints=%u\n",\
+                       id->bInterfaceNumber,\
+                       id->bAlternateSetting,\
+                       id->bInterfaceClass,\
+                       id->bInterfaceSubClass,\
+                       id->bInterfaceProtocol,\
+                       id->bNumEndpoints);\
+\
+                for (int e = 0; e < id->bNumEndpoints; e++) {\
+                    const struct libusb_endpoint_descriptor *ep =\
+                        &id->endpoint[e];\
+\
+                    printf("    EP 0x%02x  %-9s  %s  maxpacket=%u\n",\
+                           ep->bEndpointAddress,\
+                           xtype(ep->bmAttributes),\
+                           (ep->bEndpointAddress & LIBUSB_ENDPOINT_IN)\
+                             ? "IN" : "OUT",\
+                           ep->wMaxPacketSize);\
+                }\
+            }\
+        }\
+\
+        libusb_free_config_descriptor(cfg);\
+    }\
+\
+    printf("\n===== TEST OPEN/CLAIM =====\n");\
+\
+    h = libusb_open_device_with_vid_pid(ctx, 0x1199, 0x9071);\
+\
+    if (!h) {\
+        printf("OPEN: ESEC\n");\
+    } else {\
+        printf("OPEN: OK\n");\
+\
+        int tests[] = {3, 12, 13};\
+\
+        for (unsigned i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {\
+            int iface = tests[i];\
+            r = libusb_claim_interface(h, iface);\
+\
+            printf("CLAIM interface %d: %s (%d)\n",\
+                   iface, libusb_error_name(r), r);\
+\
+            if (r == 0)\
+                libusb_release_interface(h, iface);\
+        }\
+\
+        libusb_close(h);\
+    }\
+\
+    libusb_free_device_list(list, 1);\
+    libusb_exit(ctx);\
+    return 0;\
+}\
+EOF\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang em7455_diag.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o em7455_diag\
+\
+./em7455_diag
+cd /tmp/em7455-test\
+\
+cat > em7455_at.c <<'EOF'\
+#include <stdio.h>\
+#include <string.h>\
+#include <unistd.h>\
+#include <libusb.h>\
+\
+#define VID     0x1199\
+#define PID     0x9071\
+#define IFACE   3\
+#define EP_OUT  0x03\
+#define EP_IN   0x84\
+\
+static void drain(libusb_device_handle *h)\
+{\
+    unsigned char buf[4096];\
+    int got;\
+\
+    for (;;) {\
+        int r = libusb_bulk_transfer(\
+            h, EP_IN, buf, sizeof(buf), &got, 100\
+        );\
+        if (r != 0)\
+            break;\
+    }\
+}\
+\
+static void command(libusb_device_handle *h, const char *cmd)\
+{\
+    char out[512];\
+    unsigned char in[4096];\
+    int sent = 0, got = 0;\
+\
+    snprintf(out, sizeof(out), "%s\r", cmd);\
+\
+    printf("\n========================================\n");\
+    printf(">>> %s\n", cmd);\
+    printf("----------------------------------------\n");\
+\
+    int r = libusb_bulk_transfer(\
+        h,\
+        EP_OUT,\
+        (unsigned char *)out,\
+        (int)strlen(out),\
+        &sent,\
+        2000\
+    );\
+\
+    if (r != 0) {\
+        printf("WRITE ERROR: %s (%d)\n",\
+               libusb_error_name(r), r);\
+        return;\
+    }\
+\
+    printf("TX: %d bytes\n", sent);\
+\
+    for (int i = 0; i < 20; i++) {\
+        got = 0;\
+\
+        r = libusb_bulk_transfer(\
+            h,\
+            EP_IN,\
+            in,\
+            sizeof(in) - 1,\
+            &got,\
+            250\
+        );\
+\
+        if (r == LIBUSB_ERROR_TIMEOUT)\
+            continue;\
+\
+        if (r != 0) {\
+            printf("READ ERROR: %s (%d)\n",\
+                   libusb_error_name(r), r);\
+            break;\
+        }\
+\
+        if (got > 0) {\
+            in[got] = 0;\
+            fwrite(in, 1, got, stdout);\
+            fflush(stdout);\
+\
+            if (strstr((char *)in, "\r\nOK\r\n") ||\
+                strstr((char *)in, "\r\nERROR\r\n"))\
+                break;\
+        }\
+    }\
+\
+    printf("\n");\
+}\
+\
+int main(void)\
+{\
+    libusb_context *ctx = NULL;\
+    libusb_device_handle *h = NULL;\
+\
+    int r = libusb_init(&ctx);\
+\
+    if (r != 0) {\
+        fprintf(stderr, "libusb_init: %s\n",\
+                libusb_error_name(r));\
+        return 1;\
+    }\
+\
+    h = libusb_open_device_with_vid_pid(ctx, VID, PID);\
+\
+    if (!h) {\
+        fprintf(stderr, "EM7455 1199:9071 nu poate fi deschis.\n");\
+        libusb_exit(ctx);\
+        return 1;\
+    }\
+\
+    r = libusb_claim_interface(h, IFACE);\
+\
+    if (r != 0) {\
+        fprintf(stderr,\
+                "Nu pot revendica interface 3: %s (%d)\n",\
+                libusb_error_name(r), r);\
+        libusb_close(h);\
+        libusb_exit(ctx);\
+        return 1;\
+    }\
+\
+    printf("EM7455 DESCHIS\n");\
+    printf("Interface 3 CLAIMED\n");\
+    printf("OUT endpoint: 0x03\n");\
+    printf("IN  endpoint: 0x84\n");\
+\
+    drain(h);\
+\
+    command(h, "AT");\
+    command(h, "ATI");\
+    command(h, "AT+CPIN?");\
+    command(h, "AT+COPS?");\
+    command(h, "AT+CSQ");\
+    command(h, "AT+CGREG?");\
+    command(h, "AT+CEREG?");\
+    command(h, "AT+CGDCONT?");\
+\
+    libusb_release_interface(h, IFACE);\
+    libusb_close(h);\
+    libusb_exit(ctx);\
+\
+    return 0;\
+}\
+EOF\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang em7455_at.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o em7455_at\
+\
+./em7455_at
+cd /tmp/em7455-test\
+\
+cat > em7455_bridge.c <<'EOF'\
+#include <stdio.h>\
+#include <stdlib.h>\
+#include <string.h>\
+#include <unistd.h>\
+#include <fcntl.h>\
+#include <pthread.h>\
+#include <signal.h>\
+#include <libusb.h>\
+\
+#define VID     0x1199\
+#define PID     0x9071\
+#define IFACE   3\
+#define EP_OUT  0x03\
+#define EP_IN   0x84\
+\
+static libusb_device_handle *h = NULL;\
+static int master_fd = -1;\
+static volatile int running = 1;\
+\
+static void *usb_to_pty(void *arg)\
+{\
+    unsigned char buf[4096];\
+\
+    while (running) {\
+        int got = 0;\
+\
+        int r = libusb_bulk_transfer(\
+            h, EP_IN,\
+            buf, sizeof(buf),\
+            &got, 250\
+        );\
+\
+        if (r == 0 && got > 0) {\
+            write(master_fd, buf, got);\
+        } else if (r != LIBUSB_ERROR_TIMEOUT && r != 0) {\
+            fprintf(stderr, "USB READ: %s\n",\
+                    libusb_error_name(r));\
+            usleep(100000);\
+        }\
+    }\
+\
+    return NULL;\
+}\
+\
+static void *pty_to_usb(void *arg)\
+{\
+    unsigned char buf[4096];\
+\
+    while (running) {\
+        ssize_t n = read(master_fd, buf, sizeof(buf));\
+\
+        if (n > 0) {\
+            int sent = 0;\
+\
+            int r = libusb_bulk_transfer(\
+                h, EP_OUT,\
+                buf, (int)n,\
+                &sent, 2000\
+            );\
+\
+            if (r != 0)\
+                fprintf(stderr, "USB WRITE: %s\n",\
+                        libusb_error_name(r));\
+        } else {\
+            usleep(10000);\
+        }\
+    }\
+\
+    return NULL;\
+}\
+\
+static void stop_handler(int sig)\
+{\
+    running = 0;\
+}\
+\
+int main(void)\
+{\
+    libusb_context *ctx = NULL;\
+\
+    signal(SIGINT, stop_handler);\
+    signal(SIGTERM, stop_handler);\
+\
+    if (libusb_init(&ctx) != 0) {\
+        fprintf(stderr, "libusb init failed\n");\
+        return 1;\
+    }\
+\
+    h = libusb_open_device_with_vid_pid(ctx, VID, PID);\
+\
+    if (!h) {\
+        fprintf(stderr, "EM7455 nu a fost gasit\n");\
+        return 1;\
+    }\
+\
+    int r = libusb_claim_interface(h, IFACE);\
+\
+    if (r != 0) {\
+        fprintf(stderr, "claim interface 3: %s\n",\
+                libusb_error_name(r));\
+        return 1;\
+    }\
+\
+    master_fd = posix_openpt(O_RDWR | O_NOCTTY);\
+\
+    if (master_fd < 0) {\
+        perror("posix_openpt");\
+        return 1;\
+    }\
+\
+    if (grantpt(master_fd) ||\
+        unlockpt(master_fd)) {\
+        perror("grantpt/unlockpt");\
+        return 1;\
+    }\
+\
+    char *slave = ptsname(master_fd);\
+\
+    if (!slave) {\
+        perror("ptsname");\
+        return 1;\
+    }\
+\
+    printf("\n====================================\n");\
+    printf(" EM7455 USB SERIAL BRIDGE ACTIV\n");\
+    printf("====================================\n");\
+    printf("PTY: %s\n", slave);\
+    printf("USB IF: 3\n");\
+    printf("USB OUT: 0x03\n");\
+    printf("USB IN : 0x84\n");\
+    printf("\nLasa acest program deschis.\n");\
+    printf("Ctrl-C pentru oprire.\n\n");\
+    fflush(stdout);\
+\
+    pthread_t t1, t2;\
+\
+    pthread_create(&t1, NULL, usb_to_pty, NULL);\
+    pthread_create(&t2, NULL, pty_to_usb, NULL);\
+\
+    while (running)\
+        sleep(1);\
+\
+    close(master_fd);\
+\
+    libusb_release_interface(h, IFACE);\
+    libusb_close(h);\
+    libusb_exit(ctx);\
+\
+    return 0;\
+}\
+EOF\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang em7455_bridge.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -lpthread \\
+  -o em7455_bridge\
+\
+./em7455_bridge
+screen /dev/ttys001 115200
+cd /tmp/em7455-test\
+\
+cat > mbim_open.c <<'EOF'\
+#include <stdio.h>\
+#include <stdint.h>\
+#include <string.h>\
+#include <libusb.h>\
+\
+#define VID       0x1199\
+#define PID       0x9071\
+#define IFACE     12\
+#define EP_INT_IN 0x87\
+\
+static uint32_t le32read(const unsigned char *p)\
+{\
+    return ((uint32_t)p[0]) |\
+           ((uint32_t)p[1] << 8) |\
+           ((uint32_t)p[2] << 16) |\
+           ((uint32_t)p[3] << 24);\
+}\
+\
+static void dump(const unsigned char *b, int n)\
+{\
+    for (int i = 0; i < n; i++) {\
+        if (!(i % 16))\
+            printf("%04x: ", i);\
+\
+        printf("%02x ", b[i]);\
+\
+        if ((i % 16) == 15 || i == n - 1)\
+            printf("\n");\
+    }\
+}\
+\
+int main(void)\
+{\
+    libusb_context *ctx = NULL;\
+    libusb_device_handle *h = NULL;\
+    int r;\
+\
+    r = libusb_init(&ctx);\
+    if (r != 0) {\
+        printf("libusb_init: %s\n", libusb_error_name(r));\
+        return 1;\
+    }\
+\
+    h = libusb_open_device_with_vid_pid(ctx, VID, PID);\
+    if (!h) {\
+        printf("EM7455 nu poate fi deschis\n");\
+        return 1;\
+    }\
+\
+    r = libusb_claim_interface(h, IFACE);\
+    printf("CLAIM IF12: %s (%d)\n", libusb_error_name(r), r);\
+    if (r != 0)\
+        return 1;\
+\
+    /*\
+       MBIM_OPEN:\
+       MessageType        0x00000001\
+       MessageLength      16\
+       TransactionId      1\
+       MaxControlTransfer 4096\
+    */\
+    unsigned char open_msg[16] = {\
+        0x01,0x00,0x00,0x00,\
+        0x10,0x00,0x00,0x00,\
+        0x01,0x00,0x00,0x00,\
+        0x00,0x10,0x00,0x00\
+    };\
+\
+    printf("\n===== MBIM_OPEN TX =====\n");\
+    dump(open_msg, sizeof(open_msg));\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0x21,       /* OUT | CLASS | INTERFACE */\
+        0x00,       /* SEND_ENCAPSULATED_COMMAND */\
+        0,\
+        IFACE,\
+        open_msg,\
+        sizeof(open_msg),\
+        3000\
+    );\
+\
+    printf("\nSEND: %d", r);\
+    if (r < 0)\
+        printf("  %s", libusb_error_name(r));\
+    printf("\n");\
+\
+    if (r < 0)\
+        goto out;\
+\
+    printf("\n===== ASTEPT RESPONSE_AVAILABLE =====\n");\
+\
+    unsigned char intr[64];\
+    int got = 0;\
+\
+    r = libusb_interrupt_transfer(\
+        h,\
+        EP_INT_IN,\
+        intr,\
+        sizeof(intr),\
+        &got,\
+        5000\
+    );\
+\
+    printf("INTERRUPT: %s (%d), %d bytes\n",\
+           libusb_error_name(r), r, got);\
+\
+    if (r == 0 && got > 0)\
+        dump(intr, got);\
+\
+    printf("\n===== GET_ENCAPSULATED_RESPONSE =====\n");\
+\
+    unsigned char response[4096];\
+    memset(response, 0, sizeof(response));\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0xA1,       /* IN | CLASS | INTERFACE */\
+        0x01,       /* GET_ENCAPSULATED_RESPONSE */\
+        0,\
+        IFACE,\
+        response,\
+        sizeof(response),\
+        5000\
+    );\
+\
+    printf("GET: %d", r);\
+    if (r < 0)\
+        printf("  %s", libusb_error_name(r));\
+    printf("\n");\
+\
+    if (r > 0) {\
+        dump(response, r);\
+\
+        if (r >= 12) {\
+            uint32_t type = le32read(response);\
+            uint32_t len  = le32read(response + 4);\
+            uint32_t tid  = le32read(response + 8);\
+\
+            printf("\nMessageType : 0x%08x\n", type);\
+            printf("Length      : %u\n", len);\
+            printf("Transaction : %u\n", tid);\
+\
+            if (type == 0x80000001 && r >= 16) {\
+                uint32_t status = le32read(response + 12);\
+\
+                printf("OPEN_DONE status: %u\n", status);\
+\
+                if (status == 0)\
+                    printf("\n*** MBIM OPEN REUSIT ***\n");\
+                else\
+                    printf("\n*** MBIM OPEN_DONE CU EROARE ***\n");\
+            }\
+        }\
+    }\
+\
+out:\
+    libusb_release_interface(h, IFACE);\
+    libusb_close(h);\
+    libusb_exit(ctx);\
+    return 0;\
+}\
+EOF\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_open.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o mbim_open\
+\
+./mbim_open
+pgrep -af 'em7455_bridge|screen'
+ps -p 2644 -o pid,ppid,tty,stat,command
+kill 2644
+pgrep -af 'em7455_bridge|screen'
+sudo kill -9 2644\
+sleep 2\
+ps -p 2644 -o pid,ppid,stat,command
+cd /tmp/em7455-test\
+./mbim_open
+cd /tmp/em7455-test\
+\
+cat > mbim_linux_init.c <<'EOF'\
+#include <stdio.h>\
+#include <stdint.h>\
+#include <string.h>\
+#include <unistd.h>\
+#include <libusb.h>\
+\
+#define VID      0x1199\
+#define PID      0x9071\
+#define IF_CTRL  12\
+#define IF_DATA  13\
+#define EP_INT   0x87\
+\
+static uint32_t le32(const unsigned char *p)\
+{\
+    return (uint32_t)p[0] |\
+           ((uint32_t)p[1] << 8) |\
+           ((uint32_t)p[2] << 16) |\
+           ((uint32_t)p[3] << 24);\
+}\
+\
+static void dump(const unsigned char *b, int n)\
+{\
+    for (int i = 0; i < n; i++) {\
+        if ((i % 16) == 0)\
+            printf("%04x: ", i);\
+\
+        printf("%02x ", b[i]);\
+\
+        if ((i % 16) == 15 || i == n - 1)\
+            printf("\n");\
+    }\
+}\
+\
+static void show(const char *name, int r)\
+{\
+    if (r >= 0)\
+        printf("%-30s OK (%d)\n", name, r);\
+    else\
+        printf("%-30s %s (%d)\n",\
+               name, libusb_error_name(r), r);\
+}\
+\
+int main(void)\
+{\
+    libusb_context *ctx = NULL;\
+    libusb_device_handle *h = NULL;\
+    int r;\
+\
+    r = libusb_init(&ctx);\
+    if (r != 0) {\
+        show("libusb_init", r);\
+        return 1;\
+    }\
+\
+    h = libusb_open_device_with_vid_pid(ctx, VID, PID);\
+    if (!h) {\
+        printf("EM7455 nu poate fi deschis\n");\
+        return 1;\
+    }\
+\
+    r = libusb_claim_interface(h, IF_CTRL);\
+    show("CLAIM interface 12", r);\
+    if (r != 0)\
+        goto out;\
+\
+    r = libusb_claim_interface(h, IF_DATA);\
+    show("CLAIM interface 13", r);\
+    if (r != 0)\
+        goto out12;\
+\
+    printf("\n===== LINUX-LIKE MBIM/NCM INIT =====\n");\
+\
+    /*\
+     * Linux cdc_ncm_bind_common:\
+     * data alt 1 -> alt 0 -> NCM init -> pause -> alt 1\
+     */\
+\
+    r = libusb_set_interface_alt_setting(h, IF_DATA, 1);\
+    show("IF13 -> ALT 1", r);\
+    if (r != 0)\
+        goto cleanup;\
+\
+    usleep(20000);\
+\
+    r = libusb_set_interface_alt_setting(h, IF_DATA, 0);\
+    show("IF13 -> ALT 0", r);\
+    if (r != 0)\
+        goto cleanup;\
+\
+    printf("\n===== GET_NTB_PARAMETERS =====\n");\
+\
+    unsigned char ntb[64];\
+    memset(ntb, 0, sizeof(ntb));\
+\
+    /*\
+     * bmRequestType 0xA1:\
+     * Device-to-host | Class | Interface\
+     *\
+     * bRequest 0x80 = GET_NTB_PARAMETERS\
+     * wIndex  = control interface 12\
+     */\
+    r = libusb_control_transfer(\
+        h,\
+        0xA1,\
+        0x80,\
+        0,\
+        IF_CTRL,\
+        ntb,\
+        sizeof(ntb),\
+        3000\
+    );\
+\
+    show("GET_NTB_PARAMETERS", r);\
+\
+    if (r > 0)\
+        dump(ntb, r);\
+    else\
+        goto cleanup;\
+\
+    /*\
+     * Linux has an explicit 10-20 ms pause here for Sierra MC7455.\
+     */\
+    printf("\nPauza 20 ms...\n");\
+    usleep(20000);\
+\
+    r = libusb_set_interface_alt_setting(h, IF_DATA, 1);\
+    show("IF13 -> ALT 1 final", r);\
+    if (r != 0)\
+        goto cleanup;\
+\
+    usleep(20000);\
+\
+    printf("\n===== MBIM_OPEN =====\n");\
+\
+    unsigned char open_msg[16] = {\
+        0x01,0x00,0x00,0x00,\
+        0x10,0x00,0x00,0x00,\
+        0x01,0x00,0x00,0x00,\
+        0x00,0x10,0x00,0x00\
+    };\
+\
+    dump(open_msg, sizeof(open_msg));\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0x21,\
+        0x00,\
+        0,\
+        IF_CTRL,\
+        open_msg,\
+        sizeof(open_msg),\
+        3000\
+    );\
+\
+    show("SEND MBIM_OPEN", r);\
+    if (r < 0)\
+        goto cleanup;\
+\
+    printf("\n===== RESPONSE_AVAILABLE =====\n");\
+\
+    unsigned char intr[64];\
+    int got = 0;\
+\
+    r = libusb_interrupt_transfer(\
+        h,\
+        EP_INT,\
+        intr,\
+        sizeof(intr),\
+        &got,\
+        5000\
+    );\
+\
+    show("INTERRUPT 0x87", r);\
+\
+    if (r == 0 && got > 0) {\
+        printf("Interrupt bytes: %d\n", got);\
+        dump(intr, got);\
+    }\
+\
+    printf("\n===== GET_ENCAPSULATED_RESPONSE =====\n");\
+\
+    unsigned char resp[4096];\
+    memset(resp, 0, sizeof(resp));\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0xA1,\
+        0x01,\
+        0,\
+        IF_CTRL,\
+        resp,\
+        sizeof(resp),\
+        5000\
+    );\
+\
+    show("GET RESPONSE", r);\
+\
+    if (r > 0) {\
+        dump(resp, r);\
+\
+        if (r >= 16) {\
+            uint32_t type   = le32(resp);\
+            uint32_t length = le32(resp + 4);\
+            uint32_t tid    = le32(resp + 8);\
+            uint32_t status = le32(resp + 12);\
+\
+            printf("\nMessageType : 0x%08x\n", type);\
+            printf("Length      : %u\n", length);\
+            printf("Transaction : %u\n", tid);\
+            printf("Status      : %u\n", status);\
+\
+            if (type == 0x80000001 && status == 0)\
+                printf("\n*** MBIM OPEN REUSIT ***\n");\
+        }\
+    }\
+\
+cleanup:\
+    /* lÄƒ£sÄƒ£m data interface Ã®ntr-o stare neutrÄƒ£ dupÄƒ£ test */\
+    libusb_set_interface_alt_setting(h, IF_DATA, 0);\
+    libusb_release_interface(h, IF_DATA);\
+\
+out12:\
+    libusb_release_interface(h, IF_CTRL);\
+\
+out:\
+    libusb_close(h);\
+    libusb_exit(ctx);\
+    return 0;\
+}\
+EOF\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_linux_init.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o mbim_linux_init\
+\
+./mbim_linux_init
+cd /tmp/em7455-test\
+\
+cp mbim_linux_init.c mbim_caps.c
+cat > mbim_caps.c <<'EOF'\
+#include <stdio.h>\
+#include <stdint.h>\
+#include <string.h>\
+#include <unistd.h>\
+#include <libusb.h>\
+\
+#define VID      0x1199\
+#define PID      0x9071\
+#define IF_CTRL  12\
+#define IF_DATA  13\
+#define EP_INT   0x87\
+\
+static uint32_t le32(const unsigned char *p)\
+{\
+    return (uint32_t)p[0] |\
+           ((uint32_t)p[1] << 8) |\
+           ((uint32_t)p[2] << 16) |\
+           ((uint32_t)p[3] << 24);\
+}\
+\
+static void dump(const unsigned char *b, int n)\
+{\
+    for (int i = 0; i < n; i++) {\
+        if (!(i % 16))\
+            printf("%04x: ", i);\
+        printf("%02x ", b[i]);\
+        if ((i % 16) == 15 || i == n - 1)\
+            printf("\n");\
+    }\
+}\
+\
+static int get_response(libusb_device_handle *h,\
+                        unsigned char *resp,\
+                        int max)\
+{\
+    unsigned char intr[64];\
+    int got = 0;\
+\
+    int r = libusb_interrupt_transfer(\
+        h, EP_INT, intr, sizeof(intr), &got, 5000\
+    );\
+\
+    printf("RESPONSE_AVAILABLE: %s (%d), %d bytes\n",\
+           libusb_error_name(r), r, got);\
+\
+    if (r != 0)\
+        return r;\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0xA1,\
+        0x01,\
+        0,\
+        IF_CTRL,\
+        resp,\
+        max,\
+        5000\
+    );\
+\
+    printf("GET RESPONSE: %d", r);\
+    if (r < 0)\
+        printf(" %s", libusb_error_name(r));\
+    printf("\n");\
+\
+    return r;\
+}\
+\
+int main(void)\
+{\
+    libusb_context *ctx = NULL;\
+    libusb_device_handle *h = NULL;\
+    unsigned char resp[4096];\
+    int r;\
+\
+    if (libusb_init(&ctx) != 0)\
+        return 1;\
+\
+    h = libusb_open_device_with_vid_pid(ctx, VID, PID);\
+    if (!h) {\
+        printf("EM7455 nu a fost gasit\n");\
+        return 1;\
+    }\
+\
+    r = libusb_claim_interface(h, IF_CTRL);\
+    printf("CLAIM IF12: %s (%d)\n", libusb_error_name(r), r);\
+    if (r != 0)\
+        return 1;\
+\
+    r = libusb_claim_interface(h, IF_DATA);\
+    printf("CLAIM IF13: %s (%d)\n", libusb_error_name(r), r);\
+    if (r != 0)\
+        return 1;\
+\
+    /*\
+     * Initializarea necesara pentru Sierra MC/EM7455.\
+     */\
+    libusb_set_interface_alt_setting(h, IF_DATA, 1);\
+    usleep(20000);\
+\
+    libusb_set_interface_alt_setting(h, IF_DATA, 0);\
+\
+    unsigned char ntb[64];\
+    r = libusb_control_transfer(\
+        h, 0xA1, 0x80, 0, IF_CTRL,\
+        ntb, sizeof(ntb), 3000\
+    );\
+\
+    printf("GET_NTB_PARAMETERS: %d\n", r);\
+    if (r < 0)\
+        goto out;\
+\
+    usleep(20000);\
+\
+    r = libusb_set_interface_alt_setting(h, IF_DATA, 1);\
+    printf("IF13 ALT1: %s (%d)\n", libusb_error_name(r), r);\
+    if (r != 0)\
+        goto out;\
+\
+    usleep(20000);\
+\
+    /*\
+     * MBIM_OPEN, TID 1\
+     */\
+    unsigned char open_msg[16] = {\
+        0x01,0x00,0x00,0x00,\
+        0x10,0x00,0x00,0x00,\
+        0x01,0x00,0x00,0x00,\
+        0x00,0x10,0x00,0x00\
+    };\
+\
+    r = libusb_control_transfer(\
+        h, 0x21, 0x00, 0, IF_CTRL,\
+        open_msg, sizeof(open_msg), 3000\
+    );\
+\
+    printf("MBIM_OPEN SEND: %d\n", r);\
+    if (r < 0)\
+        goto out;\
+\
+    memset(resp, 0, sizeof(resp));\
+    r = get_response(h, resp, sizeof(resp));\
+\
+    if (r < 16 ||\
+        le32(resp) != 0x80000001 ||\
+        le32(resp + 12) != 0) {\
+        printf("MBIM_OPEN nu a reusit\n");\
+        goto out;\
+    }\
+\
+    printf("\n*** MBIM OPEN OK ***\n");\
+\
+    /*\
+     * MBIM_COMMAND_MSG\
+     *\
+     * MessageType   = COMMAND (3)\
+     * Length        = 48\
+     * TID           = 2\
+     * Fragments     = 1 / 0\
+     * Service       = BASIC_CONNECT\
+     * CID           = DEVICE_CAPS (1)\
+     * CommandType   = QUERY (0)\
+     * InfoLength    = 0\
+     * InfoOffset    = 0\
+     */\
+\
+    unsigned char caps[48] = {\
+        /* Header */\
+        0x03,0x00,0x00,0x00,\
+        0x30,0x00,0x00,0x00,\
+        0x02,0x00,0x00,0x00,\
+\
+        /* Fragment header */\
+        0x01,0x00,0x00,0x00,\
+        0x00,0x00,0x00,0x00,\
+\
+        /* Basic Connect UUID:\
+           a289cc33-bcbb-8b4f-b6b0-133ec2aae6df */\
+        0xa2,0x89,0xcc,0x33,\
+        0xbc,0xbb,\
+        0x8b,0x4f,\
+        0xb6,0xb0,\
+        0x13,0x3e,0xc2,0xaa,0xe6,0xdf,\
+\
+        /* CID DEVICE_CAPS = 1 */\
+        0x01,0x00,0x00,0x00,\
+\
+        /* QUERY = 0 */\
+        0x00,0x00,0x00,0x00,\
+\
+        /* InformationBufferLength = 0 */\
+        0x00,0x00,0x00,0x00,\
+\
+        /* InformationBufferOffset = 0 */\
+        0x00,0x00,0x00,0x00\
+    };\
+\
+    printf("\n===== DEVICE_CAPS QUERY TX =====\n");\
+    dump(caps, sizeof(caps));\
+\
+    r = libusb_control_transfer(\
+        h, 0x21, 0x00, 0, IF_CTRL,\
+        caps, sizeof(caps), 3000\
+    );\
+\
+    printf("DEVICE_CAPS SEND: %d\n", r);\
+\
+    if (r < 0)\
+        goto out;\
+\
+    memset(resp, 0, sizeof(resp));\
+    r = get_response(h, resp, sizeof(resp));\
+\
+    if (r > 0) {\
+        printf("\n===== DEVICE_CAPS RESPONSE =====\n");\
+        dump(resp, r);\
+\
+        if (r >= 44) {\
+            printf("\nMessageType : 0x%08x\n", le32(resp));\
+            printf("Length      : %u\n", le32(resp + 4));\
+            printf("Transaction : %u\n", le32(resp + 8));\
+        }\
+    }\
+\
+out:\
+    libusb_set_interface_alt_setting(h, IF_DATA, 0);\
+    libusb_release_interface(h, IF_DATA);\
+    libusb_release_interface(h, IF_CTRL);\
+    libusb_close(h);\
+    libusb_exit(ctx);\
+    return 0;\
+}\
+EOF\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_caps.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o mbim_caps\
+\
+./mbim_caps
+cd /tmp/em7455-test\
+\
+cat > mbim_caps2.c <<'EOF'\
+#include <stdio.h>\
+#include <stdint.h>\
+#include <string.h>\
+#include <unistd.h>\
+#include <libusb.h>\
+\
+#define VID      0x1199\
+#define PID      0x9071\
+#define IF_CTRL  12\
+#define IF_DATA  13\
+#define EP_INT   0x87\
+\
+static uint32_t le32(const unsigned char *p)\
+{\
+    return (uint32_t)p[0] |\
+           ((uint32_t)p[1] << 8) |\
+           ((uint32_t)p[2] << 16) |\
+           ((uint32_t)p[3] << 24);\
+}\
+\
+static void dump(const unsigned char *b, int n)\
+{\
+    for (int i = 0; i < n; i++) {\
+        if (!(i % 16))\
+            printf("%04x: ", i);\
+\
+        printf("%02x ", b[i]);\
+\
+        if ((i % 16) == 15 || i == n - 1)\
+            printf("\n");\
+    }\
+}\
+\
+static const char *type_name(uint32_t type)\
+{\
+    switch (type) {\
+        case 0x80000001: return "OPEN_DONE";\
+        case 0x80000002: return "CLOSE_DONE";\
+        case 0x80000003: return "COMMAND_DONE";\
+        case 0x80000004: return "FUNCTION_ERROR";\
+        case 0x80000007: return "INDICATE_STATUS";\
+        default:         return "ALT TIP";\
+    }\
+}\
+\
+static int receive_one(libusb_device_handle *h,\
+                       unsigned char *resp,\
+                       int max)\
+{\
+    unsigned char intr[64];\
+    int got = 0;\
+\
+    int r = libusb_interrupt_transfer(\
+        h, EP_INT,\
+        intr, sizeof(intr),\
+        &got, 5000\
+    );\
+\
+    printf("\nINTERRUPT: %s (%d), %d bytes\n",\
+           libusb_error_name(r), r, got);\
+\
+    if (r != 0)\
+        return r;\
+\
+    if (got > 0) {\
+        printf("Notification:\n");\
+        dump(intr, got);\
+    }\
+\
+    memset(resp, 0, max);\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0xA1,\
+        0x01,       /* GET_ENCAPSULATED_RESPONSE */\
+        0,\
+        IF_CTRL,\
+        resp,\
+        max,\
+        5000\
+    );\
+\
+    printf("GET RESPONSE: %d", r);\
+\
+    if (r < 0)\
+        printf(" %s", libusb_error_name(r));\
+\
+    printf("\n");\
+\
+    if (r >= 12) {\
+        uint32_t type = le32(resp);\
+        uint32_t len  = le32(resp + 4);\
+        uint32_t tid  = le32(resp + 8);\
+\
+        printf("Type        : 0x%08x (%s)\n",\
+               type, type_name(type));\
+        printf("Length      : %u\n", len);\
+        printf("Transaction : %u\n", tid);\
+\
+        dump(resp, r);\
+    }\
+\
+    return r;\
+}\
+\
+static int wait_for(libusb_device_handle *h,\
+                    uint32_t wanted_type,\
+                    uint32_t wanted_tid,\
+                    unsigned char *resp,\
+                    int max)\
+{\
+    for (int i = 0; i < 10; i++) {\
+\
+        int r = receive_one(h, resp, max);\
+\
+        if (r < 0)\
+            return r;\
+\
+        if (r < 12)\
+            continue;\
+\
+        uint32_t type = le32(resp);\
+        uint32_t tid  = le32(resp + 8);\
+\
+        if (type == wanted_type && tid == wanted_tid)\
+            return r;\
+\
+        printf("\nMesajul acesta nu este rÄƒ£spunsul "\
+               "tranzacÈƒ»iei aÈƒ¹teptate; continuÄƒ£m...\n");\
+    }\
+\
+    return -1000;\
+}\
+\
+int main(void)\
+{\
+    libusb_context *ctx = NULL;\
+    libusb_device_handle *h = NULL;\
+    unsigned char resp[4096];\
+    unsigned char ntb[64];\
+    int r;\
+\
+    if (libusb_init(&ctx) != 0)\
+        return 1;\
+\
+    h = libusb_open_device_with_vid_pid(ctx, VID, PID);\
+\
+    if (!h) {\
+        printf("EM7455 nu a fost gÄƒ£sit\n");\
+        return 1;\
+    }\
+\
+    r = libusb_claim_interface(h, IF_CTRL);\
+    printf("CLAIM IF12: %s (%d)\n",\
+           libusb_error_name(r), r);\
+\
+    if (r != 0)\
+        goto done;\
+\
+    r = libusb_claim_interface(h, IF_DATA);\
+    printf("CLAIM IF13: %s (%d)\n",\
+           libusb_error_name(r), r);\
+\
+    if (r != 0)\
+        goto release12;\
+\
+    /*\
+     * IniÈƒ»ializarea Sierra EM7455 care deja\
+     * s-a dovedit funcÈƒ»ionalÄƒ£.\
+     */\
+    printf("\n===== SIERRA / NCM INIT =====\n");\
+\
+    r = libusb_set_interface_alt_setting(h, IF_DATA, 1);\
+    printf("IF13 ALT1 initial: %s\n", libusb_error_name(r));\
+\
+    usleep(20000);\
+\
+    r = libusb_set_interface_alt_setting(h, IF_DATA, 0);\
+    printf("IF13 ALT0        : %s\n", libusb_error_name(r));\
+\
+    memset(ntb, 0, sizeof(ntb));\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0xA1,\
+        0x80,       /* GET_NTB_PARAMETERS */\
+        0,\
+        IF_CTRL,\
+        ntb,\
+        sizeof(ntb),\
+        3000\
+    );\
+\
+    printf("GET_NTB_PARAMETERS: %d\n", r);\
+\
+    if (r > 0)\
+        dump(ntb, r);\
+\
+    if (r < 0)\
+        goto cleanup;\
+\
+    usleep(20000);\
+\
+    r = libusb_set_interface_alt_setting(h, IF_DATA, 1);\
+    printf("IF13 ALT1 final  : %s\n", libusb_error_name(r));\
+\
+    if (r != 0)\
+        goto cleanup;\
+\
+    usleep(20000);\
+\
+    /*\
+     * MBIM_OPEN transaction 1\
+     */\
+    unsigned char open_msg[16] = {\
+        0x01,0x00,0x00,0x00,\
+        0x10,0x00,0x00,0x00,\
+        0x01,0x00,0x00,0x00,\
+        0x00,0x10,0x00,0x00\
+    };\
+\
+    printf("\n===== MBIM_OPEN =====\n");\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0x21,\
+        0x00,\
+        0,\
+        IF_CTRL,\
+        open_msg,\
+        sizeof(open_msg),\
+        3000\
+    );\
+\
+    printf("SEND OPEN: %d\n", r);\
+\
+    if (r < 0)\
+        goto cleanup;\
+\
+    r = wait_for(\
+        h,\
+        0x80000001,  /* OPEN_DONE */\
+        1,\
+        resp,\
+        sizeof(resp)\
+    );\
+\
+    if (r < 16) {\
+        printf("\nNU AM PRIMIT OPEN_DONE TID 1\n");\
+        goto cleanup;\
+    }\
+\
+    uint32_t open_status = le32(resp + 12);\
+\
+    printf("\nOPEN_DONE status: %u\n", open_status);\
+\
+    if (open_status != 0) {\
+        printf("MBIM_OPEN a eÈƒ¹uat\n");\
+        goto cleanup;\
+    }\
+\
+    printf("\n*** MBIM OPEN OK ***\n");\
+\
+    /*\
+     * DEVICE_CAPS QUERY\
+     *\
+     * TOTAL = 48 bytes.\
+     * NU existÄƒ£ InformationBufferOffset aici.\
+     */\
+    unsigned char caps[48] = {\
+        /* MBIM header */\
+        0x03,0x00,0x00,0x00,  /* COMMAND */\
+        0x30,0x00,0x00,0x00,  /* 48 bytes */\
+        0x02,0x00,0x00,0x00,  /* TID 2 */\
+\
+        /* Fragment header */\
+        0x01,0x00,0x00,0x00,\
+        0x00,0x00,0x00,0x00,\
+\
+        /* BASIC_CONNECT UUID */\
+        0xa2,0x89,0xcc,0x33,\
+        0xbc,0xbb,\
+        0x8b,0x4f,\
+        0xb6,0xb0,\
+        0x13,0x3e,0xc2,0xaa,0xe6,0xdf,\
+\
+        /* CID = DEVICE_CAPS = 1 */\
+        0x01,0x00,0x00,0x00,\
+\
+        /* CommandType = QUERY */\
+        0x00,0x00,0x00,0x00,\
+\
+        /* InformationBufferLength = 0 */\
+        0x00,0x00,0x00,0x00\
+    };\
+\
+    printf("\n===== DEVICE_CAPS QUERY =====\n");\
+    dump(caps, sizeof(caps));\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0x21,\
+        0x00,\
+        0,\
+        IF_CTRL,\
+        caps,\
+        sizeof(caps),\
+        3000\
+    );\
+\
+    printf("DEVICE_CAPS SEND: %d\n", r);\
+\
+    if (r < 0)\
+        goto cleanup;\
+\
+    r = wait_for(\
+        h,\
+        0x80000003,  /* COMMAND_DONE */\
+        2,\
+        resp,\
+        sizeof(resp)\
+    );\
+\
+    if (r < 48) {\
+        printf("\nNU AM PRIMIT COMMAND_DONE TID 2\n");\
+        goto cleanup;\
+    }\
+\
+    printf("\n===== DEVICE_CAPS COMMAND_DONE =====\n");\
+\
+    uint32_t cid     = le32(resp + 36);\
+    uint32_t status  = le32(resp + 40);\
+    uint32_t infolen = le32(resp + 44);\
+\
+    printf("CID         : %u\n", cid);\
+    printf("Status      : %u\n", status);\
+    printf("Info length : %u\n", infolen);\
+\
+    if (cid == 1 && status == 0)\
+        printf("\n*** DEVICE_CAPS REUSIT ***\n");\
+\
+cleanup:\
+    libusb_set_interface_alt_setting(h, IF_DATA, 0);\
+    libusb_release_interface(h, IF_DATA);\
+\
+release12:\
+    libusb_release_interface(h, IF_CTRL);\
+\
+done:\
+    libusb_close(h);\
+    libusb_exit(ctx);\
+    return 0;\
+}\
+EOF\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_caps2.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o mbim_caps2\
+\
+./mbim_caps2
+cd /tmp/em7455-test\
+\
+cp mbim_caps2.c mbim_caps3.c\
+\
+python3 <<'PY'\
+p = "mbim_caps3.c"\
+\
+s = open(p).read()\
+\
+# OPEN TID: 1 -> 100 (0x64)\
+old = """        0x01,0x00,0x00,0x00,\
+        0x00,0x10,0x00,0x00\
+"""\
+new = """        0x64,0x00,0x00,0x00,\
+        0x00,0x10,0x00,0x00\
+"""\
+s = s.replace(old, new, 1)\
+\
+# AÈƒ¹teptÄƒ£m OPEN_DONE TID 100\
+s = s.replace(\
+"""        0x80000001,  /* OPEN_DONE */\
+        1,\
+""",\
+"""        0x80000001,  /* OPEN_DONE */\
+        100,\
+""",\
+1)\
+\
+# DEVICE_CAPS TID 2 -> 101 (0x65)\
+s = s.replace(\
+"""        0x02,0x00,0x00,0x00,  /* TID 2 */\
+""",\
+"""        0x65,0x00,0x00,0x00,  /* TID 101 */\
+""",\
+1)\
+\
+# AÈƒ¹teptÄƒ£m COMMAND_DONE TID 101\
+s = s.replace(\
+"""        0x80000003,  /* COMMAND_DONE */\
+        2,\
+""",\
+"""        0x80000003,  /* COMMAND_DONE */\
+        101,\
+""",\
+1)\
+\
+# Mai multe mesaje stale pot exista Ã®n coadÄƒ£\
+s = s.replace(\
+"""for (int i = 0; i < 10; i++)""",\
+"""for (int i = 0; i < 30; i++)""",\
+1)\
+\
+open(p, "w").write(s)\
+PY\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_caps3.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o mbim_caps3\
+\
+./mbim_caps3
+cd /tmp/em7455-test\
+\
+cat > mbim_status.c <<'EOF'\
+#include <stdio.h>\
+#include <stdint.h>\
+#include <string.h>\
+#include <unistd.h>\
+#include <libusb.h>\
+\
+#define VID      0x1199\
+#define PID      0x9071\
+#define IF_CTRL  12\
+#define IF_DATA  13\
+#define EP_INT   0x87\
+\
+static const unsigned char basic_uuid[16] = {\
+    0xa2,0x89,0xcc,0x33,0xbc,0xbb,0x8b,0x4f,\
+    0xb6,0xb0,0x13,0x3e,0xc2,0xaa,0xe6,0xdf\
+};\
+\
+static uint32_t le32(const unsigned char *p)\
+{\
+    return (uint32_t)p[0] |\
+           ((uint32_t)p[1] << 8) |\
+           ((uint32_t)p[2] << 16) |\
+           ((uint32_t)p[3] << 24);\
+}\
+\
+static uint64_t le64(const unsigned char *p)\
+{\
+    return (uint64_t)le32(p) |\
+           ((uint64_t)le32(p + 4) << 32);\
+}\
+\
+static void put32(unsigned char *p, uint32_t v)\
+{\
+    p[0] = v;\
+    p[1] = v >> 8;\
+    p[2] = v >> 16;\
+    p[3] = v >> 24;\
+}\
+\
+static const char *msg_name(uint32_t t)\
+{\
+    switch (t) {\
+        case 0x80000001: return "OPEN_DONE";\
+        case 0x80000002: return "CLOSE_DONE";\
+        case 0x80000003: return "COMMAND_DONE";\
+        case 0x80000004: return "FUNCTION_ERROR";\
+        case 0x80000007: return "INDICATE_STATUS";\
+        default: return "OTHER";\
+    }\
+}\
+\
+static int receive_one(libusb_device_handle *h,\
+                       unsigned char *resp, int max)\
+{\
+    unsigned char intr[64];\
+    int got = 0;\
+\
+    int r = libusb_interrupt_transfer(\
+        h, EP_INT, intr, sizeof(intr), &got, 3000\
+    );\
+\
+    if (r != 0)\
+        return r;\
+\
+    memset(resp, 0, max);\
+\
+    r = libusb_control_transfer(\
+        h, 0xA1, 0x01, 0, IF_CTRL,\
+        resp, max, 5000\
+    );\
+\
+    if (r >= 12) {\
+        printf("RX %-15s TID=%u LEN=%u\n",\
+               msg_name(le32(resp)),\
+               le32(resp + 8),\
+               le32(resp + 4));\
+    }\
+\
+    return r;\
+}\
+\
+static int wait_for(libusb_device_handle *h,\
+                    uint32_t type, uint32_t tid,\
+                    unsigned char *resp, int max)\
+{\
+    int timeouts = 0;\
+\
+    for (int i = 0; i < 60; i++) {\
+        int r = receive_one(h, resp, max);\
+\
+        if (r == LIBUSB_ERROR_TIMEOUT) {\
+            if (++timeouts >= 4)\
+                return r;\
+            continue;\
+        }\
+\
+        if (r < 0)\
+            return r;\
+\
+        if (r < 12)\
+            continue;\
+\
+        uint32_t rt = le32(resp);\
+        uint32_t id = le32(resp + 8);\
+\
+        if (id == tid && rt == 0x80000004) {\
+            printf("FUNCTION_ERROR TID=%u cod=%u\n",\
+                   tid, r >= 16 ? le32(resp + 12) : 0);\
+            return -100;\
+        }\
+\
+        if (rt == type && id == tid)\
+            return r;\
+    }\
+\
+    return -101;\
+}\
+\
+static int send_query(libusb_device_handle *h,\
+                      uint32_t cid, uint32_t tid,\
+                      unsigned char *resp, int max)\
+{\
+    unsigned char q[48];\
+    memset(q, 0, sizeof(q));\
+\
+    put32(q + 0,  3);      /* MBIM_COMMAND_MSG */\
+    put32(q + 4,  48);\
+    put32(q + 8,  tid);\
+\
+    put32(q + 12, 1);      /* TotalFragments */\
+    put32(q + 16, 0);      /* CurrentFragment */\
+\
+    memcpy(q + 20, basic_uuid, 16);\
+\
+    put32(q + 36, cid);\
+    put32(q + 40, 0);      /* QUERY */\
+    put32(q + 44, 0);      /* InformationBufferLength */\
+\
+    printf("\n===== QUERY CID %u / TID %u =====\n", cid, tid);\
+\
+    int r = libusb_control_transfer(\
+        h, 0x21, 0x00, 0, IF_CTRL,\
+        q, sizeof(q), 3000\
+    );\
+\
+    printf("SEND: %d\n", r);\
+\
+    if (r < 0)\
+        return r;\
+\
+    r = wait_for(h, 0x80000003, tid, resp, max);\
+\
+    if (r < 48)\
+        return r;\
+\
+    printf("CID=%u STATUS=%u INFOLEN=%u\n",\
+           le32(resp + 36),\
+           le32(resp + 40),\
+           le32(resp + 44));\
+\
+    return r;\
+}\
+\
+static const char *ready_name(uint32_t s)\
+{\
+    switch (s) {\
+        case 0: return "NOT_INITIALIZED";\
+        case 1: return "INITIALIZED";\
+        case 2: return "SIM_NOT_INSERTED";\
+        case 3: return "BAD_SIM";\
+        case 4: return "FAILURE";\
+        case 5: return "NOT_ACTIVATED";\
+        case 6: return "DEVICE_LOCKED";\
+        default: return "UNKNOWN";\
+    }\
+}\
+\
+static const char *reg_name(uint32_t s)\
+{\
+    switch (s) {\
+        case 0: return "UNKNOWN";\
+        case 1: return "DEREGISTERED";\
+        case 2: return "SEARCHING";\
+        case 3: return "HOME";\
+        case 4: return "ROAMING";\
+        case 5: return "PARTNER";\
+        case 6: return "DENIED";\
+        default: return "?";\
+    }\
+}\
+\
+static const char *packet_name(uint32_t s)\
+{\
+    switch (s) {\
+        case 0: return "UNKNOWN";\
+        case 1: return "ATTACHING";\
+        case 2: return "ATTACHED";\
+        case 3: return "DETACHING";\
+        case 4: return "DETACHED";\
+        default: return "?";\
+    }\
+}\
+\
+int main(void)\
+{\
+    libusb_context *ctx = NULL;\
+    libusb_device_handle *h = NULL;\
+    unsigned char resp[4096], ntb[64];\
+    int r;\
+\
+    if (libusb_init(&ctx) != 0)\
+        return 1;\
+\
+    h = libusb_open_device_with_vid_pid(ctx, VID, PID);\
+    if (!h) {\
+        printf("EM7455 nu a fost gÄƒ£sit\n");\
+        return 1;\
+    }\
+\
+    r = libusb_claim_interface(h, IF_CTRL);\
+    printf("CLAIM IF12: %s\n", libusb_error_name(r));\
+    if (r != 0) goto done;\
+\
+    r = libusb_claim_interface(h, IF_DATA);\
+    printf("CLAIM IF13: %s\n", libusb_error_name(r));\
+    if (r != 0) goto rel12;\
+\
+    /* Sierra EM7455 / Linux-like initialization */\
+    libusb_set_interface_alt_setting(h, IF_DATA, 1);\
+    usleep(20000);\
+    libusb_set_interface_alt_setting(h, IF_DATA, 0);\
+\
+    r = libusb_control_transfer(\
+        h, 0xA1, 0x80, 0, IF_CTRL,\
+        ntb, sizeof(ntb), 3000\
+    );\
+    printf("GET_NTB_PARAMETERS: %d\n", r);\
+    if (r < 0) goto cleanup;\
+\
+    usleep(20000);\
+    libusb_set_interface_alt_setting(h, IF_DATA, 1);\
+    usleep(20000);\
+\
+    /* OPEN TID 500 */\
+    unsigned char openmsg[16] = {0};\
+    put32(openmsg + 0, 1);\
+    put32(openmsg + 4, 16);\
+    put32(openmsg + 8, 500);\
+    put32(openmsg + 12, 4096);\
+\
+    r = libusb_control_transfer(\
+        h, 0x21, 0x00, 0, IF_CTRL,\
+        openmsg, sizeof(openmsg), 3000\
+    );\
+\
+    printf("MBIM_OPEN SEND: %d\n", r);\
+    if (r < 0) goto cleanup;\
+\
+    r = wait_for(h, 0x80000001, 500, resp, sizeof(resp));\
+    if (r < 16 || le32(resp + 12) != 0) {\
+        printf("MBIM_OPEN NU A REUÈƒ¸IT\n");\
+        goto cleanup;\
+    }\
+\
+    printf("\n*** MBIM OPEN OK ***\n");\
+\
+    /* CID 2: Subscriber Ready */\
+    r = send_query(h, 2, 501, resp, sizeof(resp));\
+    if (r >= 52 && le32(resp + 40) == 0) {\
+        unsigned char *info = resp + 48;\
+        printf("Subscriber Ready: %u (%s)\n",\
+               le32(info), ready_name(le32(info)));\
+    }\
+\
+    /* CID 9: Register State */\
+    r = send_query(h, 9, 502, resp, sizeof(resp));\
+    if (r >= 56 && le32(resp + 40) == 0) {\
+        unsigned char *info = resp + 48;\
+        printf("Network error : %u\n", le32(info + 0));\
+        printf("Register state: %u (%s)\n",\
+               le32(info + 4), reg_name(le32(info + 4)));\
+        printf("Register mode : %u\n", le32(info + 8));\
+        printf("Data classes  : 0x%08x\n", le32(info + 12));\
+    }\
+\
+    /* CID 10: Packet Service */\
+    r = send_query(h, 10, 503, resp, sizeof(resp));\
+    if (r >= 76 && le32(resp + 40) == 0) {\
+        unsigned char *info = resp + 48;\
+        printf("Network error : %u\n", le32(info + 0));\
+        printf("Packet service: %u (%s)\n",\
+               le32(info + 4), packet_name(le32(info + 4)));\
+        printf("Data class    : 0x%08x\n", le32(info + 8));\
+        printf("Uplink        : %llu bit/s\n",\
+               (unsigned long long)le64(info + 12));\
+        printf("Downlink      : %llu bit/s\n",\
+               (unsigned long long)le64(info + 20));\
+    }\
+\
+    /* CID 11: Signal State */\
+    r = send_query(h, 11, 504, resp, sizeof(resp));\
+    if (r >= 68 && le32(resp + 40) == 0) {\
+        unsigned char *info = resp + 48;\
+        printf("RSSI           : %u\n", le32(info + 0));\
+        printf("Error rate     : %u\n", le32(info + 4));\
+        printf("Signal interval: %u\n", le32(info + 8));\
+        printf("RSSI threshold : %u\n", le32(info + 12));\
+    }\
+\
+    /* CLOSE TID 599 */\
+    unsigned char closemsg[12] = {0};\
+    put32(closemsg + 0, 2);\
+    put32(closemsg + 4, 12);\
+    put32(closemsg + 8, 599);\
+\
+    printf("\n===== MBIM_CLOSE =====\n");\
+\
+    r = libusb_control_transfer(\
+        h, 0x21, 0x00, 0, IF_CTRL,\
+        closemsg, sizeof(closemsg), 3000\
+    );\
+\
+    printf("CLOSE SEND: %d\n", r);\
+\
+    if (r >= 0) {\
+        r = wait_for(h, 0x80000002, 599, resp, sizeof(resp));\
+        if (r >= 16)\
+            printf("*** MBIM CLOSE OK, status=%u ***\n",\
+                   le32(resp + 12));\
+    }\
+\
+cleanup:\
+    libusb_set_interface_alt_setting(h, IF_DATA, 0);\
+    libusb_release_interface(h, IF_DATA);\
+\
+rel12:\
+    libusb_release_interface(h, IF_CTRL);\
+\
+done:\
+    libusb_close(h);\
+    libusb_exit(ctx);\
+    return 0;\
+}\
+EOF\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_status.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o mbim_status\
+\
+./mbim_status
+cd /tmp/em7455-test\
+cp mbim_status.c mbim_connect_query.c\
+\
+python3 <<'PY'\
+p = "mbim_connect_query.c"\
+s = open(p).read()\
+\
+marker = "    /* CLOSE TID 599 */"\
+\
+insert = r'''\
+    /*\
+     * CID 12: CONNECT QUERY, Session 0\
+     * READ-ONLY: nu activeaza si nu dezactiveaza conexiunea.\
+     */\
+    printf("\n===== CONNECT QUERY - SESSION 0 =====\n");\
+\
+    static const unsigned char internet_uuid[16] = {\
+        0x7e,0x5e,0x2a,0x7e,\
+        0x4e,0x6f,\
+        0x72,0x72,\
+        0x73,0x6b,\
+        0x65,0x6e,0x7e,0x5e,0x2a,0x7e\
+    };\
+\
+    unsigned char cq[84];\
+    memset(cq, 0, sizeof(cq));\
+\
+    /* MBIM_COMMAND_MSG */\
+    put32(cq + 0,  3);\
+    put32(cq + 4,  84);\
+    put32(cq + 8,  505);\
+\
+    /* Fragment header */\
+    put32(cq + 12, 1);\
+    put32(cq + 16, 0);\
+\
+    memcpy(cq + 20, basic_uuid, 16);\
+\
+    put32(cq + 36, 12);    /* CID CONNECT */\
+    put32(cq + 40, 0);     /* QUERY */\
+    put32(cq + 44, 36);    /* Info length */\
+\
+    unsigned char *ci = cq + 48;\
+\
+    put32(ci + 0,  0);     /* Session ID 0 */\
+    put32(ci + 4,  1);     /* standard query value */\
+    put32(ci + 8,  0);     /* Voice call state NONE */\
+    put32(ci + 12, 0);     /* IP type DEFAULT */\
+    memcpy(ci + 16, internet_uuid, 16);\
+    put32(ci + 32, 0);     /* Network error */\
+\
+    r = libusb_control_transfer(\
+        h, 0x21, 0x00, 0, IF_CTRL,\
+        cq, sizeof(cq), 3000\
+    );\
+\
+    printf("CONNECT QUERY SEND: %d\n", r);\
+\
+    if (r >= 0) {\
+        r = wait_for(\
+            h,\
+            0x80000003,   /* COMMAND_DONE */\
+            505,\
+            resp,\
+            sizeof(resp)\
+        );\
+\
+        if (r >= 84) {\
+            uint32_t cid = le32(resp + 36);\
+            uint32_t status = le32(resp + 40);\
+            uint32_t infolen = le32(resp + 44);\
+            unsigned char *info = resp + 48;\
+\
+            printf("CID             : %u\n", cid);\
+            printf("Command status  : %u\n", status);\
+            printf("Info length     : %u\n", infolen);\
+\
+            if (status == 0 && infolen >= 36) {\
+                uint32_t session = le32(info + 0);\
+                uint32_t act     = le32(info + 4);\
+                uint32_t voice   = le32(info + 8);\
+                uint32_t iptype  = le32(info + 12);\
+                uint32_t nwerr   = le32(info + 32);\
+\
+                const char *astr =\
+                    act == 0 ? "UNKNOWN" :\
+                    act == 1 ? "ACTIVATED" :\
+                    act == 2 ? "ACTIVATING" :\
+                    act == 3 ? "DEACTIVATED" :\
+                    act == 4 ? "DEACTIVATING" : "?";\
+\
+                printf("\nSession ID       : %u\n", session);\
+                printf("Activation state : %u (%s)\n", act, astr);\
+                printf("Voice call state : %u\n", voice);\
+                printf("IP type          : %u\n", iptype);\
+                printf("Network error    : %u\n", nwerr);\
+\
+                printf("\n*** CONNECT QUERY REUSIT ***\n");\
+            }\
+        }\
+    }\
+\
+'''\
+\
+if marker not in s:\
+    raise SystemExit("Markerul CLOSE nu a fost gasit")\
+\
+s = s.replace(marker, insert + marker, 1)\
+open(p, "w").write(s)\
+PY\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_connect_query.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o mbim_connect_query\
+\
+./mbim_connect_query
+cd /tmp/em7455-test\
+\
+cp mbim_status.c mbim_activate.c\
+\
+python3 <<'PY'\
+p = "mbim_activate.c"\
+s = open(p).read()\
+\
+# Pentru activare lÄƒ£sÄƒ£m mai mult timp decÃƒ‚t la simple query-uri.\
+s = s.replace(\
+    "if (++timeouts >= 4)",\
+    "if (++timeouts >= 20)"\
+)\
+\
+marker = "    /* CLOSE TID 599 */"\
+\
+insert = r'''\
+    /*\
+     * ================================================================\
+     * CONNECT ACTIVATE - SESSION 0\
+     * APN: broadband\
+     * IPv4 only pentru primul test\
+     * ================================================================\
+     */\
+    {\
+        static const unsigned char internet_uuid[16] = {\
+            0x7e,0x5e,0x2a,0x7e,\
+            0x4e,0x6f,\
+            0x72,0x72,\
+            0x73,0x6b,\
+            0x65,0x6e,0x7e,0x5e,0x2a,0x7e\
+        };\
+\
+        int bearer_activated = 0;\
+        uint32_t activation_state = 0;\
+\
+        printf("\n============================================\n");\
+        printf(" MBIM CONNECT ACTIVATE - APN broadband\n");\
+        printf("============================================\n");\
+\
+        /*\
+         * Fixed MBIM_SET_CONNECT info = 60 bytes.\
+         * "broadband" = 9 caractere UTF-16LE = 18 bytes.\
+         * Cu padding la 4 bytes => 20 bytes.\
+         *\
+         * InformationBuffer = 60 + 20 = 80 bytes.\
+         * Mesaj total = 48 + 80 = 128 bytes.\
+         */\
+        unsigned char con[128];\
+        memset(con, 0, sizeof(con));\
+\
+        /* MBIM_COMMAND */\
+        put32(con + 0,  3);\
+        put32(con + 4,  sizeof(con));\
+        put32(con + 8,  700);\
+\
+        /* Fragment header */\
+        put32(con + 12, 1);\
+        put32(con + 16, 0);\
+\
+        memcpy(con + 20, basic_uuid, 16);\
+\
+        put32(con + 36, 12);     /* MBIM_CID_CONNECT */\
+        put32(con + 40, 1);      /* SET */\
+        put32(con + 44, 80);     /* InformationBufferLength */\
+\
+        unsigned char *ci = con + 48;\
+\
+        put32(ci + 0,  0);       /* SessionId = 0 */\
+        put32(ci + 4,  1);       /* ACTIVATE */\
+\
+        put32(ci + 8,  60);      /* AccessStringOffset */\
+        put32(ci + 12, 18);      /* AccessStringSize */\
+\
+        put32(ci + 16, 0);       /* UsernameOffset */\
+        put32(ci + 20, 0);       /* UsernameSize */\
+        put32(ci + 24, 0);       /* PasswordOffset */\
+        put32(ci + 28, 0);       /* PasswordSize */\
+\
+        put32(ci + 32, 0);       /* Compression NONE */\
+        put32(ci + 36, 0);       /* Auth NONE */\
+        put32(ci + 40, 1);       /* IP type IPv4 */\
+\
+        memcpy(ci + 44, internet_uuid, 16);\
+\
+        /* broadband -> UTF-16LE */\
+        const char *apn = "broadband";\
+        for (int i = 0; apn[i]; i++) {\
+            ci[60 + i * 2]     = (unsigned char)apn[i];\
+            ci[60 + i * 2 + 1] = 0;\
+        }\
+\
+        printf("Session : 0\n");\
+        printf("APN     : broadband\n");\
+        printf("IP type : IPv4\n");\
+\
+        r = libusb_control_transfer(\
+            h,\
+            0x21, 0x00, 0, IF_CTRL,\
+            con, sizeof(con), 5000\
+        );\
+\
+        printf("CONNECT ACTIVATE SEND: %d\n", r);\
+\
+        if (r >= 0) {\
+            r = wait_for(\
+                h,\
+                0x80000003,       /* COMMAND_DONE */\
+                700,\
+                resp,\
+                sizeof(resp)\
+            );\
+\
+            if (r >= 48) {\
+                uint32_t cid     = le32(resp + 36);\
+                uint32_t status  = le32(resp + 40);\
+                uint32_t infolen = le32(resp + 44);\
+\
+                printf("\n===== CONNECT ACTIVATE RESPONSE =====\n");\
+                printf("CID            : %u\n", cid);\
+                printf("Command status : %u\n", status);\
+                printf("Info length    : %u\n", infolen);\
+\
+                if (status == 0 && infolen >= 36 && r >= 84) {\
+                    unsigned char *info = resp + 48;\
+\
+                    activation_state = le32(info + 4);\
+\
+                    printf("Session ID      : %u\n", le32(info + 0));\
+                    printf("Activation state: %u\n", activation_state);\
+                    printf("Voice state     : %u\n", le32(info + 8));\
+                    printf("IP type         : %u\n", le32(info + 12));\
+                    printf("Network error   : %u\n", le32(info + 32));\
+\
+                    if (activation_state == 1) {\
+                        bearer_activated = 1;\
+                        printf("\n*** BEARER ACTIVATED ***\n");\
+                    }\
+                }\
+            }\
+        }\
+\
+        /*\
+         * DacÄƒ£ rÄƒ£spunsul a fost ACTIVATING, interogÄƒ£m Session 0\
+         * pÃƒ‚nÄƒ£ devine ACTIVATED.\
+         */\
+        if (!bearer_activated && activation_state == 2) {\
+            printf("\nBearer-ul este ACTIVATING; asteptam...\n");\
+\
+            for (int attempt = 0; attempt < 15 && !bearer_activated; attempt++) {\
+                sleep(1);\
+\
+                uint32_t tid = 710 + attempt;\
+\
+                unsigned char cq[84];\
+                memset(cq, 0, sizeof(cq));\
+\
+                put32(cq + 0,  3);\
+                put32(cq + 4,  84);\
+                put32(cq + 8,  tid);\
+                put32(cq + 12, 1);\
+                put32(cq + 16, 0);\
+\
+                memcpy(cq + 20, basic_uuid, 16);\
+\
+                put32(cq + 36, 12);   /* CONNECT */\
+                put32(cq + 40, 0);    /* QUERY */\
+                put32(cq + 44, 36);\
+\
+                /* Restul query-ului rÄƒ£mÃƒ‚ne zero; SessionId=0 */\
+\
+                r = libusb_control_transfer(\
+                    h, 0x21, 0x00, 0, IF_CTRL,\
+                    cq, sizeof(cq), 5000\
+                );\
+\
+                if (r < 0)\
+                    break;\
+\
+                r = wait_for(\
+                    h,\
+                    0x80000003,\
+                    tid,\
+                    resp,\
+                    sizeof(resp)\
+                );\
+\
+                if (r >= 84 && le32(resp + 40) == 0) {\
+                    unsigned char *info = resp + 48;\
+\
+                    activation_state = le32(info + 4);\
+\
+                    printf("CONNECT QUERY #%d: state=%u, nwerr=%u\n",\
+                           attempt + 1,\
+                           activation_state,\
+                           le32(info + 32));\
+\
+                    if (activation_state == 1) {\
+                        bearer_activated = 1;\
+                        printf("\n*** BEARER ACTIVATED ***\n");\
+                    }\
+\
+                    if (activation_state == 3)\
+                        break;\
+                }\
+            }\
+        }\
+\
+        /*\
+         * ============================================================\
+         * IP CONFIGURATION QUERY\
+         * ============================================================\
+         */\
+        if (bearer_activated) {\
+            printf("\n============================================\n");\
+            printf(" MBIM IP CONFIGURATION\n");\
+            printf("============================================\n");\
+\
+            /*\
+             * MBIM_IP_CONFIGURATION query:\
+             * fixed InformationBuffer = 60 bytes\
+             * numai SessionId trebuie setat; restul zero.\
+             */\
+            unsigned char ipq[108];\
+            memset(ipq, 0, sizeof(ipq));\
+\
+            put32(ipq + 0,  3);\
+            put32(ipq + 4,  108);\
+            put32(ipq + 8,  730);\
+\
+            put32(ipq + 12, 1);\
+            put32(ipq + 16, 0);\
+\
+            memcpy(ipq + 20, basic_uuid, 16);\
+\
+            put32(ipq + 36, 15);       /* IP_CONFIGURATION */\
+            put32(ipq + 40, 0);        /* QUERY */\
+            put32(ipq + 44, 60);\
+\
+            /* ipq + 48: SessionId = 0 Èƒ¹i restul zero */\
+\
+            r = libusb_control_transfer(\
+                h,\
+                0x21, 0x00, 0, IF_CTRL,\
+                ipq, sizeof(ipq), 5000\
+            );\
+\
+            printf("IP CONFIG SEND: %d\n", r);\
+\
+            if (r >= 0) {\
+                r = wait_for(\
+                    h,\
+                    0x80000003,\
+                    730,\
+                    resp,\
+                    sizeof(resp)\
+                );\
+\
+                if (r >= 108) {\
+                    uint32_t status  = le32(resp + 40);\
+                    uint32_t infolen = le32(resp + 44);\
+\
+                    printf("Command status : %u\n", status);\
+                    printf("Info length    : %u\n", infolen);\
+\
+                    if (status == 0 && infolen >= 60) {\
+                        unsigned char *ip = resp + 48;\
+\
+                        uint32_t session = le32(ip + 0);\
+\
+                        uint32_t v4flags = le32(ip + 4);\
+                        uint32_t v6flags = le32(ip + 8);\
+\
+                        uint32_t v4count = le32(ip + 12);\
+                        uint32_t v4off   = le32(ip + 16);\
+\
+                        uint32_t v6count = le32(ip + 20);\
+                        uint32_t v6off   = le32(ip + 24);\
+\
+                        uint32_t gw4off  = le32(ip + 28);\
+                        uint32_t gw6off  = le32(ip + 32);\
+\
+                        uint32_t dns4count = le32(ip + 36);\
+                        uint32_t dns4off   = le32(ip + 40);\
+\
+                        uint32_t dns6count = le32(ip + 44);\
+                        uint32_t dns6off   = le32(ip + 48);\
+\
+                        uint32_t mtu4 = le32(ip + 52);\
+                        uint32_t mtu6 = le32(ip + 56);\
+\
+                        printf("\n===== NEGOTIATED IP SETTINGS =====\n");\
+                        printf("Session ID : %u\n", session);\
+                        printf("IPv4 flags : 0x%08x\n", v4flags);\
+                        printf("IPv6 flags : 0x%08x\n", v6flags);\
+\
+                        if ((v4flags & 0x1) &&\
+                            v4count > 0 &&\
+                            v4off != 0 &&\
+                            v4off + 8 <= infolen) {\
+\
+                            unsigned char *e = ip + v4off;\
+                            uint32_t prefix = le32(e);\
+\
+                            printf("IPv4       : %u.%u.%u.%u/%u\n",\
+                                   e[4], e[5], e[6], e[7], prefix);\
+                        } else {\
+                            printf("IPv4       : indisponibil\n");\
+                        }\
+\
+                        if ((v4flags & 0x2) &&\
+                            gw4off != 0 &&\
+                            gw4off + 4 <= infolen) {\
+\
+                            unsigned char *g = ip + gw4off;\
+\
+                            printf("Gateway    : %u.%u.%u.%u\n",\
+                                   g[0], g[1], g[2], g[3]);\
+                        }\
+\
+                        if ((v4flags & 0x4) &&\
+                            dns4count > 0 &&\
+                            dns4off != 0 &&\
+                            dns4off + (dns4count * 4) <= infolen) {\
+\
+                            for (uint32_t i = 0; i < dns4count; i++) {\
+                                unsigned char *d = ip + dns4off + i * 4;\
+\
+                                printf("DNS %-6u : %u.%u.%u.%u\n",\
+                                       i + 1,\
+                                       d[0], d[1], d[2], d[3]);\
+                            }\
+                        }\
+\
+                        if (v4flags & 0x8)\
+                            printf("IPv4 MTU   : %u\n", mtu4);\
+\
+                        printf("IPv6 count : %u\n", v6count);\
+                        printf("IPv6 offset: %u\n", v6off);\
+                        printf("IPv6 GW off: %u\n", gw6off);\
+                        printf("IPv6 DNS   : %u\n", dns6count);\
+                        printf("IPv6 DNSoff: %u\n", dns6off);\
+                        printf("IPv6 MTU   : %u\n", mtu6);\
+\
+                        printf("\n*** IP CONFIGURATION REUSIT ***\n");\
+                    }\
+                }\
+            }\
+        }\
+\
+        /*\
+         * ============================================================\
+         * DEACTIVATE SESSION 0\
+         * Testul nu lasÄƒ£ bearer-ul OS activ dupÄƒ£ terminare.\
+         * ============================================================\
+         */\
+        if (bearer_activated) {\
+            printf("\n============================================\n");\
+            printf(" DEACTIVATE SESSION 0\n");\
+            printf("============================================\n");\
+\
+            unsigned char deact[108];\
+            memset(deact, 0, sizeof(deact));\
+\
+            put32(deact + 0,  3);\
+            put32(deact + 4,  108);\
+            put32(deact + 8,  790);\
+\
+            put32(deact + 12, 1);\
+            put32(deact + 16, 0);\
+\
+            memcpy(deact + 20, basic_uuid, 16);\
+\
+            put32(deact + 36, 12);      /* CONNECT */\
+            put32(deact + 40, 1);       /* SET */\
+            put32(deact + 44, 60);      /* fixed connect info */\
+\
+            unsigned char *di = deact + 48;\
+\
+            put32(di + 0,  0);          /* Session 0 */\
+            put32(di + 4,  0);          /* DEACTIVATE */\
+\
+            put32(di + 32, 0);          /* Compression NONE */\
+            put32(di + 36, 0);          /* Auth NONE */\
+            put32(di + 40, 1);          /* IPv4 */\
+            memcpy(di + 44, internet_uuid, 16);\
+\
+            r = libusb_control_transfer(\
+                h,\
+                0x21, 0x00, 0, IF_CTRL,\
+                deact, sizeof(deact), 5000\
+            );\
+\
+            printf("DEACTIVATE SEND: %d\n", r);\
+\
+            if (r >= 0) {\
+                r = wait_for(\
+                    h,\
+                    0x80000003,\
+                    790,\
+                    resp,\
+                    sizeof(resp)\
+                );\
+\
+                if (r >= 84) {\
+                    printf("Command status  : %u\n", le32(resp + 40));\
+\
+                    if (le32(resp + 40) == 0) {\
+                        unsigned char *info = resp + 48;\
+\
+                        printf("Activation state: %u\n",\
+                               le32(info + 4));\
+                        printf("Network error   : %u\n",\
+                               le32(info + 32));\
+\
+                        printf("*** SESSION 0 DEACTIVATED ***\n");\
+                    }\
+                }\
+            }\
+        }\
+    }\
+\
+'''\
+\
+if marker not in s:\
+    raise SystemExit("Nu gÄƒ£sesc markerul MBIM_CLOSE Ã®n mbim_status.c")\
+\
+s = s.replace(marker, insert + marker, 1)\
+\
+open(p, "w").write(s)\
+PY\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_activate.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o mbim_activate\
+\
+./mbim_activate
+cd /tmp/em7455-test\
+\
+cp mbim_activate.c mbim_data_test.c\
+\
+python3 <<'PY'\
+p = "mbim_data_test.c"\
+s = open(p).read()\
+\
+helpers = r'''\
+static uint16_t get16le(const unsigned char *p)\
+{\
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);\
+}\
+\
+static void put16le(unsigned char *p, uint16_t v)\
+{\
+    p[0] = v & 0xff;\
+    p[1] = (v >> 8) & 0xff;\
+}\
+\
+static uint16_t checksum16(const unsigned char *buf, int len)\
+{\
+    uint32_t sum = 0;\
+\
+    while (len > 1) {\
+        sum += ((uint16_t)buf[0] << 8) | buf[1];\
+        buf += 2;\
+        len -= 2;\
+    }\
+\
+    if (len)\
+        sum += ((uint16_t)buf[0] << 8);\
+\
+    while (sum >> 16)\
+        sum = (sum & 0xffff) + (sum >> 16);\
+\
+    return (uint16_t)(~sum);\
+}\
+\
+static int ncm_dns_test(libusb_device_handle *h,\
+                        const unsigned char src_ip[4],\
+                        const unsigned char dns_ip[4])\
+{\
+    unsigned char ip[512];\
+    memset(ip, 0, sizeof(ip));\
+\
+    /*\
+     * DNS query:\
+     * transaction 0x1234\
+     * example.com A\
+     */\
+    unsigned char dns[] = {\
+        0x12,0x34,             /* Transaction ID */\
+        0x01,0x00,             /* Standard query */\
+        0x00,0x01,             /* QDCOUNT */\
+        0x00,0x00,             /* ANCOUNT */\
+        0x00,0x00,             /* NSCOUNT */\
+        0x00,0x00,             /* ARCOUNT */\
+\
+        0x07,'e','x','a','m','p','l','e',\
+        0x03,'c','o','m',\
+        0x00,\
+\
+        0x00,0x01,             /* A */\
+        0x00,0x01              /* IN */\
+    };\
+\
+    int dnslen = sizeof(dns);\
+    int udplen = 8 + dnslen;\
+    int iplen  = 20 + udplen;\
+\
+    /* IPv4 header */\
+    ip[0] = 0x45;\
+    ip[1] = 0x00;\
+\
+    ip[2] = (iplen >> 8) & 0xff;\
+    ip[3] = iplen & 0xff;\
+\
+    ip[4] = 0x42;\
+    ip[5] = 0x42;\
+\
+    ip[6] = 0x00;\
+    ip[7] = 0x00;\
+\
+    ip[8] = 64;        /* TTL */\
+    ip[9] = 17;        /* UDP */\
+\
+    memcpy(ip + 12, src_ip, 4);\
+    memcpy(ip + 16, dns_ip, 4);\
+\
+    uint16_t csum = checksum16(ip, 20);\
+    ip[10] = (csum >> 8) & 0xff;\
+    ip[11] = csum & 0xff;\
+\
+    /* UDP */\
+    unsigned char *udp = ip + 20;\
+\
+    /* source port 54321 */\
+    udp[0] = 0xd4;\
+    udp[1] = 0x31;\
+\
+    /* destination port 53 */\
+    udp[2] = 0x00;\
+    udp[3] = 0x35;\
+\
+    udp[4] = (udplen >> 8) & 0xff;\
+    udp[5] = udplen & 0xff;\
+\
+    /* UDP checksum 0 este permis pentru IPv4 */\
+    udp[6] = 0;\
+    udp[7] = 0;\
+\
+    memcpy(udp + 8, dns, dnslen);\
+\
+    printf("\n============================================\n");\
+    printf(" MBIM/NCM DATA PLANE TEST\n");\
+    printf("============================================\n");\
+\
+    printf("Source IP : %u.%u.%u.%u\n",\
+           src_ip[0], src_ip[1], src_ip[2], src_ip[3]);\
+\
+    printf("DNS target: %u.%u.%u.%u\n",\
+           dns_ip[0], dns_ip[1], dns_ip[2], dns_ip[3]);\
+\
+    /*\
+     * Modemul raporteazÄƒ£:\
+     * wNtbOutMaxDatagrams = 16\
+     *\
+     * NDP16 maxim:\
+     * 8 bytes header + 17 DPE * 4 = 76 bytes.\
+     *\
+     * Linux rezervÄƒ£ aceastÄƒ£ zonÄƒ£ Ã®naintea payloadului.\
+     */\
+    const int NTH_OFFSET     = 0;\
+    const int NDP_OFFSET     = 12;\
+    const int NDP_RESERVED   = 76;\
+    const int PAYLOAD_OFFSET = 12 + 76;\
+\
+    unsigned char ntb[2048];\
+    memset(ntb, 0, sizeof(ntb));\
+\
+    int blocklen = PAYLOAD_OFFSET + iplen;\
+\
+    /*\
+     * NTH16\
+     * signature = "NCMH"\
+     */\
+    put32(ntb + NTH_OFFSET + 0, 0x484d434e);\
+    put16le(ntb + NTH_OFFSET + 4, 12);\
+    put16le(ntb + NTH_OFFSET + 6, 0);\
+    put16le(ntb + NTH_OFFSET + 8, blocklen);\
+    put16le(ntb + NTH_OFFSET + 10, NDP_OFFSET);\
+\
+    /*\
+     * NDP16 pentru MBIM IPS Session 0.\
+     */\
+    put32(ntb + NDP_OFFSET + 0, 0x00535049);\
+\
+    /* wLength: header + un DPE + terminator = 16 */\
+    put16le(ntb + NDP_OFFSET + 4, 16);\
+\
+    /* no next NDP */\
+    put16le(ntb + NDP_OFFSET + 6, 0);\
+\
+    /* Datagram pointer */\
+    put16le(ntb + NDP_OFFSET + 8, PAYLOAD_OFFSET);\
+    put16le(ntb + NDP_OFFSET + 10, iplen);\
+\
+    /* terminating NULL DPE */\
+    put16le(ntb + NDP_OFFSET + 12, 0);\
+    put16le(ntb + NDP_OFFSET + 14, 0);\
+\
+    memcpy(ntb + PAYLOAD_OFFSET, ip, iplen);\
+\
+    /*\
+     * Explicit NTB16.\
+     */\
+    int r = libusb_control_transfer(\
+        h,\
+        0x21,\
+        0x84,          /* SET_NTB_FORMAT */\
+        0,             /* NTB16 */\
+        IF_CTRL,\
+        NULL,\
+        0,\
+        3000\
+    );\
+\
+    printf("SET_NTB_FORMAT16: %s (%d)\n",\
+           r >= 0 ? "OK" : libusb_error_name(r), r);\
+\
+    /*\
+     * Input buffer size 16384, conform parametrilor raportaÈƒ»i\
+     * de EM7455.\
+     */\
+    unsigned char insz[4] = {0x00,0x40,0x00,0x00};\
+\
+    r = libusb_control_transfer(\
+        h,\
+        0x21,\
+        0x86,          /* SET_NTB_INPUT_SIZE */\
+        0,\
+        IF_CTRL,\
+        insz,\
+        sizeof(insz),\
+        3000\
+    );\
+\
+    printf("SET_NTB_INPUT_SIZE: %s (%d)\n",\
+           r >= 0 ? "OK" : libusb_error_name(r), r);\
+\
+    int sent = 0;\
+\
+    printf("TX NTB length: %d\n", blocklen);\
+    printf("TX IPv4/UDP/DNS payload: %d bytes\n", iplen);\
+\
+    r = libusb_bulk_transfer(\
+        h,\
+        0x04,\
+        ntb,\
+        blocklen,\
+        &sent,\
+        5000\
+    );\
+\
+    printf("BULK OUT 0x04: %s (%d), sent=%d\n",\
+           libusb_error_name(r), r, sent);\
+\
+    if (r != 0)\
+        return 0;\
+\
+    printf("\nAÈƒ¹tept rÄƒ£spuns DNS pe endpoint 0x86...\n");\
+\
+    for (int attempt = 0; attempt < 15; attempt++) {\
+        unsigned char rx[16384];\
+        int got = 0;\
+\
+        r = libusb_bulk_transfer(\
+            h,\
+            0x86,\
+            rx,\
+            sizeof(rx),\
+            &got,\
+            1000\
+        );\
+\
+        if (r == LIBUSB_ERROR_TIMEOUT) {\
+            printf(".");\
+            fflush(stdout);\
+            continue;\
+        }\
+\
+        if (r != 0) {\
+            printf("\nBULK IN error: %s (%d)\n",\
+                   libusb_error_name(r), r);\
+            break;\
+        }\
+\
+        printf("\nRX NTB: %d bytes\n", got);\
+\
+        if (got < 28)\
+            continue;\
+\
+        uint32_t nthsig = le32(rx);\
+\
+        if (nthsig != 0x484d434e) {\
+            printf("NTH signature necunoscutÄƒ£: 0x%08x\n",\
+                   nthsig);\
+            continue;\
+        }\
+\
+        int block = get16le(rx + 8);\
+        int ndpo  = get16le(rx + 10);\
+\
+        printf("NTH16 block=%d NDP=%d\n", block, ndpo);\
+\
+        int loops = 0;\
+\
+        while (ndpo &&\
+               ndpo + 16 <= got &&\
+               loops++ < 10) {\
+\
+            uint32_t sig = le32(rx + ndpo);\
+            int ndplen   = get16le(rx + ndpo + 4);\
+            int next     = get16le(rx + ndpo + 6);\
+\
+            printf("NDP signature=0x%08x len=%d next=%d\n",\
+                   sig, ndplen, next);\
+\
+            /*\
+             * lower 24 bits = "IPS"\
+             * high byte = Session ID; noi vrem Session 0\
+             */\
+            if ((sig & 0x00ffffff) == 0x00535049 &&\
+                ((sig >> 24) & 0xff) == 0) {\
+\
+                for (int pos = ndpo + 8;\
+                     pos + 4 <= ndpo + ndplen;\
+                     pos += 4) {\
+\
+                    int off = get16le(rx + pos);\
+                    int len = get16le(rx + pos + 2);\
+\
+                    if (!off || !len)\
+                        break;\
+\
+                    if (off + len > got || len < 20)\
+                        continue;\
+\
+                    unsigned char *pkt = rx + off;\
+\
+                    int version = pkt[0] >> 4;\
+\
+                    if (version != 4)\
+                        continue;\
+\
+                    int ihl = (pkt[0] & 0x0f) * 4;\
+\
+                    if (ihl < 20 || len < ihl + 8)\
+                        continue;\
+\
+                    printf("IPv4 RX: %u.%u.%u.%u -> %u.%u.%u.%u "\
+                           "proto=%u len=%d\n",\
+                           pkt[12],pkt[13],pkt[14],pkt[15],\
+                           pkt[16],pkt[17],pkt[18],pkt[19],\
+                           pkt[9], len);\
+\
+                    if (pkt[9] != 17)\
+                        continue;\
+\
+                    unsigned char *u = pkt + ihl;\
+\
+                    uint16_t sport =\
+                        ((uint16_t)u[0] << 8) | u[1];\
+\
+                    uint16_t dport =\
+                        ((uint16_t)u[2] << 8) | u[3];\
+\
+                    int ulen =\
+                        ((uint16_t)u[4] << 8) | u[5];\
+\
+                    printf("UDP RX: %u -> %u, len=%d\n",\
+                           sport, dport, ulen);\
+\
+                    if (sport == 53 &&\
+                        dport == 54321 &&\
+                        len >= ihl + 8 + 12) {\
+\
+                        unsigned char *d = u + 8;\
+\
+                        uint16_t txid =\
+                            ((uint16_t)d[0] << 8) | d[1];\
+\
+                        uint16_t flags =\
+                            ((uint16_t)d[2] << 8) | d[3];\
+\
+                        uint16_t answers =\
+                            ((uint16_t)d[6] << 8) | d[7];\
+\
+                        printf("DNS TXID   : 0x%04x\n", txid);\
+                        printf("DNS flags  : 0x%04x\n", flags);\
+                        printf("DNS answers: %u\n", answers);\
+\
+                        if (txid == 0x1234 &&\
+                            (flags & 0x8000)) {\
+\
+                            printf("\n");\
+                            printf("*************************************\n");\
+                            printf("* DATA PLANE LTE FUNCTIONEAZA!      *\n");\
+                            printf("* DNS request + response prin MBIM. *\n");\
+                            printf("*************************************\n");\
+\
+                            return 1;\
+                        }\
+                    }\
+                }\
+            }\
+\
+            ndpo = next;\
+        }\
+    }\
+\
+    printf("\nNU AM PRIMIT RÄ‚SPUNSUL DNS AÈƒ¸TEPTAT.\n");\
+    return 0;\
+}\
+\
+'''\
+\
+s = s.replace("int main(void)", helpers + "\nint main(void)", 1)\
+\
+marker = r'''\
+        /*\
+         * ============================================================\
+         * DEACTIVATE SESSION 0\
+'''\
+\
+insert = r'''\
+        /*\
+         * ============================================================\
+         * DATA PLANE TEST\
+         * InterogÄƒ£m din nou IP_CONFIGURATION pentru IP + primul DNS,\
+         * apoi trimitem o cerere DNS direct prin MBIM/NCM.\
+         * ============================================================\
+         */\
+        if (bearer_activated) {\
+            printf("\n============================================\n");\
+            printf(" READ IP CONFIG FOR DATA TEST\n");\
+            printf("============================================\n");\
+\
+            unsigned char dq[108];\
+            memset(dq, 0, sizeof(dq));\
+\
+            put32(dq + 0,  3);\
+            put32(dq + 4,  108);\
+            put32(dq + 8,  740);\
+            put32(dq + 12, 1);\
+            put32(dq + 16, 0);\
+\
+            memcpy(dq + 20, basic_uuid, 16);\
+\
+            put32(dq + 36, 15);   /* IP_CONFIGURATION */\
+            put32(dq + 40, 0);    /* QUERY */\
+            put32(dq + 44, 60);\
+\
+            r = libusb_control_transfer(\
+                h,\
+                0x21,0x00,0,IF_CTRL,\
+                dq,sizeof(dq),5000\
+            );\
+\
+            printf("IP CONFIG DATA TEST SEND: %d\n", r);\
+\
+            if (r >= 0) {\
+                r = wait_for(\
+                    h,\
+                    0x80000003,\
+                    740,\
+                    resp,\
+                    sizeof(resp)\
+                );\
+\
+                if (r >= 108 &&\
+                    le32(resp + 40) == 0) {\
+\
+                    unsigned char *ipcfg = resp + 48;\
+\
+                    uint32_t v4flags   = le32(ipcfg + 4);\
+                    uint32_t v4count   = le32(ipcfg + 12);\
+                    uint32_t v4off     = le32(ipcfg + 16);\
+                    uint32_t dns4count = le32(ipcfg + 36);\
+                    uint32_t dns4off   = le32(ipcfg + 40);\
+                    uint32_t infolen   = le32(resp + 44);\
+\
+                    if ((v4flags & 0x1) &&\
+                        (v4flags & 0x4) &&\
+                        v4count > 0 &&\
+                        dns4count > 0 &&\
+                        v4off + 8 <= infolen &&\
+                        dns4off + 4 <= infolen) {\
+\
+                        unsigned char *v4entry = ipcfg + v4off;\
+                        unsigned char *srcip   = v4entry + 4;\
+                        unsigned char *dnsip   = ipcfg + dns4off;\
+\
+                        ncm_dns_test(h, srcip, dnsip);\
+                    } else {\
+                        printf("Lipsesc IPv4/DNS pentru test.\n");\
+                    }\
+                }\
+            }\
+        }\
+\
+'''\
+\
+if marker not in s:\
+    raise SystemExit("Nu gÄƒ£sesc markerul DEACTIVATE")\
+\
+s = s.replace(marker, insert + marker, 1)\
+\
+open(p, "w").write(s)\
+PY\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_data_test.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -o mbim_data_test\
+\
+./mbim_data_test
+cd /tmp/em7455-test\
+\
+cat > utun_test.c <<'EOF'\
+#include <stdio.h>\
+#include <stdlib.h>\
+#include <string.h>\
+#include <unistd.h>\
+#include <errno.h>\
+\
+#include <sys/types.h>\
+#include <sys/socket.h>\
+#include <sys/ioctl.h>\
+#include <sys/kern_control.h>\
+#include <sys/sys_domain.h>\
+\
+#define UTUN_CONTROL_NAME "com.apple.net.utun_control"\
+#define UTUN_OPT_IFNAME 2\
+\
+int main(void)\
+{\
+    int fd;\
+    struct ctl_info ctl;\
+    struct sockaddr_ctl addr;\
+    char ifname[64];\
+    socklen_t ifname_len = sizeof(ifname);\
+\
+    fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);\
+    if (fd < 0) {\
+        perror("socket(PF_SYSTEM)");\
+        return 1;\
+    }\
+\
+    memset(&ctl, 0, sizeof(ctl));\
+    strncpy(ctl.ctl_name,\
+            UTUN_CONTROL_NAME,\
+            sizeof(ctl.ctl_name) - 1);\
+\
+    if (ioctl(fd, CTLIOCGINFO, &ctl) < 0) {\
+        perror("CTLIOCGINFO");\
+        close(fd);\
+        return 1;\
+    }\
+\
+    printf("UTUN control ID: %u\n", ctl.ctl_id);\
+\
+    memset(&addr, 0, sizeof(addr));\
+    addr.sc_len = sizeof(addr);\
+    addr.sc_family = AF_SYSTEM;\
+    addr.ss_sysaddr = AF_SYS_CONTROL;\
+    addr.sc_id = ctl.ctl_id;\
+\
+    /*\
+     * sc_unit = 0 => kernelul alege automat\
+     * prima unitate utun disponibilÄƒ£.\
+     */\
+    addr.sc_unit = 0;\
+\
+    if (connect(fd,\
+                (struct sockaddr *)&addr,\
+                sizeof(addr)) < 0) {\
+        perror("connect utun");\
+        close(fd);\
+        return 1;\
+    }\
+\
+    memset(ifname, 0, sizeof(ifname));\
+\
+    if (getsockopt(fd,\
+                   SYSPROTO_CONTROL,\
+                   UTUN_OPT_IFNAME,\
+                   ifname,\
+                   &ifname_len) < 0) {\
+        perror("UTUN_OPT_IFNAME");\
+        close(fd);\
+        return 1;\
+    }\
+\
+    printf("\n*****************************\n");\
+    printf("* UTUN CREAT CU SUCCES      *\n");\
+    printf("* Interface: %-15s *\n", ifname);\
+    printf("*****************************\n");\
+\
+    close(fd);\
+\
+    printf("\nUTUN Ã®nchis curat.\n");\
+\
+    return 0;\
+}\
+EOF\
+\
+clang utun_test.c -o utun_test\
+\
+sudo ./utun_test
+cd /tmp/em7455-test\
+\
+cp mbim_activate.c mbim_utun_bridge.c\
+\
+python3 <<'PY'\
+p = "mbim_utun_bridge.c"\
+s = open(p).read()\
+\
+# Header-ele necesare pentru utun + threads\
+anchor = "#include <libusb.h>"\
+extra_headers = r'''\
+#include <stdlib.h>\
+#include <errno.h>\
+#include <signal.h>\
+#include <pthread.h>\
+#include <poll.h>\
+#include <arpa/inet.h>\
+#include <sys/types.h>\
+#include <sys/socket.h>\
+#include <sys/ioctl.h>\
+#include <sys/kern_control.h>\
+#include <sys/sys_domain.h>\
+'''\
+s = s.replace(anchor, anchor + extra_headers, 1)\
+\
+helpers = r'''\
+#define UTUN_CONTROL_NAME "com.apple.net.utun_control"\
+#define UTUN_OPT_IFNAME 2\
+\
+static volatile sig_atomic_t bridge_stop = 0;\
+\
+static void bridge_sigint(int sig)\
+{\
+    (void)sig;\
+    bridge_stop = 1;\
+}\
+\
+static uint16_t get16le(const unsigned char *p)\
+{\
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);\
+}\
+\
+static void put16le(unsigned char *p, uint16_t v)\
+{\
+    p[0] = v & 0xff;\
+    p[1] = (v >> 8) & 0xff;\
+}\
+\
+static int create_utun(char *ifname, size_t ifname_size)\
+{\
+    int fd;\
+    struct ctl_info ctl;\
+    struct sockaddr_ctl addr;\
+    socklen_t len;\
+\
+    fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);\
+    if (fd < 0) {\
+        perror("socket utun");\
+        return -1;\
+    }\
+\
+    memset(&ctl, 0, sizeof(ctl));\
+    strncpy(ctl.ctl_name,\
+            UTUN_CONTROL_NAME,\
+            sizeof(ctl.ctl_name) - 1);\
+\
+    if (ioctl(fd, CTLIOCGINFO, &ctl) < 0) {\
+        perror("CTLIOCGINFO");\
+        close(fd);\
+        return -1;\
+    }\
+\
+    memset(&addr, 0, sizeof(addr));\
+    addr.sc_len = sizeof(addr);\
+    addr.sc_family = AF_SYSTEM;\
+    addr.ss_sysaddr = AF_SYS_CONTROL;\
+    addr.sc_id = ctl.ctl_id;\
+    addr.sc_unit = 0;\
+\
+    if (connect(fd,\
+                (struct sockaddr *)&addr,\
+                sizeof(addr)) < 0) {\
+        perror("connect utun");\
+        close(fd);\
+        return -1;\
+    }\
+\
+    memset(ifname, 0, ifname_size);\
+    len = (socklen_t)ifname_size;\
+\
+    if (getsockopt(fd,\
+                   SYSPROTO_CONTROL,\
+                   UTUN_OPT_IFNAME,\
+                   ifname,\
+                   &len) < 0) {\
+        perror("UTUN_OPT_IFNAME");\
+        close(fd);\
+        return -1;\
+    }\
+\
+    return fd;\
+}\
+\
+struct bridge_ctx {\
+    libusb_device_handle *h;\
+    int utun_fd;\
+\
+    uint16_t sequence;\
+\
+    unsigned long long tx_packets;\
+    unsigned long long rx_packets;\
+};\
+\
+/*\
+ * macOS utun -> MBIM/NCM -> USB 0x04\
+ */\
+static void *utun_to_mbim(void *arg)\
+{\
+    struct bridge_ctx *ctx = arg;\
+\
+    while (!bridge_stop) {\
+        struct pollfd pfd;\
+        unsigned char frame[4096];\
+\
+        pfd.fd = ctx->utun_fd;\
+        pfd.events = POLLIN;\
+        pfd.revents = 0;\
+\
+        int pr = poll(&pfd, 1, 500);\
+\
+        if (pr < 0) {\
+            if (errno == EINTR)\
+                continue;\
+\
+            perror("poll utun");\
+            bridge_stop = 1;\
+            break;\
+        }\
+\
+        if (pr == 0)\
+            continue;\
+\
+        ssize_t n = read(ctx->utun_fd,\
+                         frame,\
+                         sizeof(frame));\
+\
+        if (n <= 4)\
+            continue;\
+\
+        uint32_t afnet;\
+        memcpy(&afnet, frame, 4);\
+\
+        uint32_t af = ntohl(afnet);\
+\
+        /*\
+         * Primul nostru bearer este IPv4 only.\
+         */\
+        if (af != AF_INET)\
+            continue;\
+\
+        unsigned char *ip = frame + 4;\
+        int iplen = (int)n - 4;\
+\
+        if (iplen <= 0 || iplen > 2000)\
+            continue;\
+\
+        if ((ip[0] >> 4) != 4)\
+            continue;\
+\
+        /*\
+         * AcelaÈƒ¹i NTB16 care a funcÈƒ»ionat deja Ã®n testul DNS.\
+         */\
+        unsigned char ntb[4096];\
+        memset(ntb, 0, sizeof(ntb));\
+\
+        const int ndp_offset = 12;\
+        const int payload_offset = 88;\
+\
+        int blocklen = payload_offset + iplen;\
+\
+        /*\
+         * NTH16: "NCMH"\
+         */\
+        put32(ntb + 0, 0x484d434e);\
+        put16le(ntb + 4, 12);\
+        put16le(ntb + 6, ctx->sequence++);\
+        put16le(ntb + 8, blocklen);\
+        put16le(ntb + 10, ndp_offset);\
+\
+        /*\
+         * NDP16 IPS session 0\
+         */\
+        put32(ntb + ndp_offset + 0, 0x00535049);\
+        put16le(ntb + ndp_offset + 4, 16);\
+        put16le(ntb + ndp_offset + 6, 0);\
+\
+        put16le(ntb + ndp_offset + 8, payload_offset);\
+        put16le(ntb + ndp_offset + 10, iplen);\
+\
+        put16le(ntb + ndp_offset + 12, 0);\
+        put16le(ntb + ndp_offset + 14, 0);\
+\
+        memcpy(ntb + payload_offset, ip, iplen);\
+\
+        int sent = 0;\
+\
+        int r = libusb_bulk_transfer(\
+            ctx->h,\
+            0x04,\
+            ntb,\
+            blocklen,\
+            &sent,\
+            5000\
+        );\
+\
+        if (r != 0) {\
+            if (!bridge_stop)\
+                fprintf(stderr,\
+                        "USB TX: %s (%d)\n",\
+                        libusb_error_name(r), r);\
+\
+            bridge_stop = 1;\
+            break;\
+        }\
+\
+        ctx->tx_packets++;\
+\
+        if (ctx->tx_packets <= 5 ||\
+            !(ctx->tx_packets % 50)) {\
+            printf("TX utun -> LTE: %llu packets\n",\
+                   ctx->tx_packets);\
+        }\
+    }\
+\
+    return NULL;\
+}\
+\
+/*\
+ * USB 0x86 -> MBIM/NCM -> macOS utun\
+ */\
+static void *mbim_to_utun(void *arg)\
+{\
+    struct bridge_ctx *ctx = arg;\
+\
+    while (!bridge_stop) {\
+        unsigned char rx[16384];\
+        int got = 0;\
+\
+        int r = libusb_bulk_transfer(\
+            ctx->h,\
+            0x86,\
+            rx,\
+            sizeof(rx),\
+            &got,\
+            1000\
+        );\
+\
+        if (r == LIBUSB_ERROR_TIMEOUT)\
+            continue;\
+\
+        if (r != 0) {\
+            if (!bridge_stop)\
+                fprintf(stderr,\
+                        "USB RX: %s (%d)\n",\
+                        libusb_error_name(r), r);\
+\
+            bridge_stop = 1;\
+            break;\
+        }\
+\
+        if (got < 28)\
+            continue;\
+\
+        if (le32(rx) != 0x484d434e)\
+            continue;\
+\
+        int ndpo = get16le(rx + 10);\
+        int guard = 0;\
+\
+        while (ndpo &&\
+               ndpo + 16 <= got &&\
+               guard++ < 16) {\
+\
+            uint32_t sig = le32(rx + ndpo);\
+\
+            int ndplen = get16le(rx + ndpo + 4);\
+            int next   = get16le(rx + ndpo + 6);\
+\
+            /*\
+             * lower 24 bits = "IPS"\
+             * high byte = session id.\
+             * Noi acceptÄƒ£m numai Session 0.\
+             */\
+            if ((sig & 0x00ffffff) == 0x00535049 &&\
+                ((sig >> 24) & 0xff) == 0) {\
+\
+                for (int pos = ndpo + 8;\
+                     pos + 4 <= ndpo + ndplen;\
+                     pos += 4) {\
+\
+                    int off = get16le(rx + pos);\
+                    int len = get16le(rx + pos + 2);\
+\
+                    if (!off || !len)\
+                        break;\
+\
+                    if (off < 0 ||\
+                        len <= 0 ||\
+                        off + len > got ||\
+                        len > 4096)\
+                        continue;\
+\
+                    unsigned char *ip = rx + off;\
+\
+                    if ((ip[0] >> 4) != 4)\
+                        continue;\
+\
+                    unsigned char packet[4100];\
+\
+                    /*\
+                     * utun ABI:\
+                     * 4 bytes protocol family in network byte order.\
+                     */\
+                    uint32_t af = htonl(AF_INET);\
+\
+                    memcpy(packet, &af, 4);\
+                    memcpy(packet + 4, ip, len);\
+\
+                    ssize_t wr = write(\
+                        ctx->utun_fd,\
+                        packet,\
+                        len + 4\
+                    );\
+\
+                    if (wr < 0) {\
+                        if (!bridge_stop)\
+                            perror("write utun");\
+\
+                        bridge_stop = 1;\
+                        break;\
+                    }\
+\
+                    ctx->rx_packets++;\
+\
+                    if (ctx->rx_packets <= 5 ||\
+                        !(ctx->rx_packets % 50)) {\
+                        printf("RX LTE -> utun: %llu packets\n",\
+                               ctx->rx_packets);\
+                    }\
+                }\
+            }\
+\
+            ndpo = next;\
+        }\
+    }\
+\
+    return NULL;\
+}\
+\
+'''\
+\
+s = s.replace("int main(void)",\
+              helpers + "\nint main(void)",\
+              1)\
+\
+marker = r'''\
+        /*\
+         * ============================================================\
+         * DEACTIVATE SESSION 0\
+'''\
+\
+bridge = r'''\
+        /*\
+         * ============================================================\
+         * REAL macOS UTUN <-> MBIM BRIDGE\
+         * ============================================================\
+         */\
+        if (bearer_activated) {\
+\
+            printf("\n============================================\n");\
+            printf(" CREATE REAL macOS LTE INTERFACE\n");\
+            printf("============================================\n");\
+\
+            /*\
+             * Citim din nou IP_CONFIGURATION, ca sÄƒ£ configurÄƒ£m\
+             * interfaÈƒ»a utun cu valorile reale negociate.\
+             */\
+            unsigned char bq[108];\
+            memset(bq, 0, sizeof(bq));\
+\
+            put32(bq + 0,  3);\
+            put32(bq + 4,  108);\
+            put32(bq + 8,  741);\
+            put32(bq + 12, 1);\
+            put32(bq + 16, 0);\
+\
+            memcpy(bq + 20, basic_uuid, 16);\
+\
+            put32(bq + 36, 15);   /* IP_CONFIGURATION */\
+            put32(bq + 40, 0);    /* QUERY */\
+            put32(bq + 44, 60);\
+\
+            r = libusb_control_transfer(\
+                h,\
+                0x21, 0x00, 0, IF_CTRL,\
+                bq, sizeof(bq), 5000\
+            );\
+\
+            if (r >= 0) {\
+                r = wait_for(\
+                    h,\
+                    0x80000003,\
+                    741,\
+                    resp,\
+                    sizeof(resp)\
+                );\
+            }\
+\
+            if (r >= 108 &&\
+                le32(resp + 40) == 0) {\
+\
+                unsigned char *ipcfg = resp + 48;\
+\
+                uint32_t flags     = le32(ipcfg + 4);\
+                uint32_t v4count   = le32(ipcfg + 12);\
+                uint32_t v4off     = le32(ipcfg + 16);\
+                uint32_t gwoff     = le32(ipcfg + 28);\
+                uint32_t dnscount  = le32(ipcfg + 36);\
+                uint32_t dnsoff    = le32(ipcfg + 40);\
+                uint32_t mtu       = le32(ipcfg + 52);\
+                uint32_t infolen   = le32(resp + 44);\
+\
+                if ((flags & 0x0f) == 0x0f &&\
+                    v4count > 0 &&\
+                    dnscount > 0 &&\
+                    v4off + 8 <= infolen &&\
+                    gwoff + 4 <= infolen &&\
+                    dnsoff + 4 <= infolen) {\
+\
+                    unsigned char *v4e = ipcfg + v4off;\
+                    unsigned char *src = v4e + 4;\
+                    unsigned char *gw  = ipcfg + gwoff;\
+                    unsigned char *dns = ipcfg + dnsoff;\
+\
+                    char srcs[32], gws[32], dnss[32];\
+\
+                    snprintf(srcs, sizeof(srcs),\
+                             "%u.%u.%u.%u",\
+                             src[0],src[1],src[2],src[3]);\
+\
+                    snprintf(gws, sizeof(gws),\
+                             "%u.%u.%u.%u",\
+                             gw[0],gw[1],gw[2],gw[3]);\
+\
+                    snprintf(dnss, sizeof(dnss),\
+                             "%u.%u.%u.%u",\
+                             dns[0],dns[1],dns[2],dns[3]);\
+\
+                    if (!mtu)\
+                        mtu = 1430;\
+\
+                    char ifname[64];\
+                    int utun_fd = create_utun(\
+                        ifname,\
+                        sizeof(ifname)\
+                    );\
+\
+                    if (utun_fd >= 0) {\
+\
+                        printf("UTUN       : %s\n", ifname);\
+                        printf("IPv4       : %s\n", srcs);\
+                        printf("Peer/GW    : %s\n", gws);\
+                        printf("DNS test   : %s\n", dnss);\
+                        printf("MTU        : %u\n", mtu);\
+\
+                        char cmd[512];\
+\
+                        snprintf(\
+                            cmd, sizeof(cmd),\
+                            "/sbin/ifconfig %s inet %s %s mtu %u up",\
+                            ifname, srcs, gws, mtu\
+                        );\
+\
+                        printf("\n$ %s\n", cmd);\
+\
+                        int cfg = system(cmd);\
+\
+                        if (cfg == 0) {\
+\
+                            /*\
+                             * Nu schimbÄƒ£m default route.\
+                             * Numai DNS1 este trimis prin LTE.\
+                             */\
+                            snprintf(\
+                                cmd, sizeof(cmd),\
+                                "/sbin/route -n add -host %s -interface %s",\
+                                dnss, ifname\
+                            );\
+\
+                            printf("$ %s\n", cmd);\
+\
+                            int rr = system(cmd);\
+\
+                            if (rr == 0) {\
+\
+                                /*\
+                                 * Explicit NTB16 + input buffer.\
+                                 */\
+                                libusb_control_transfer(\
+                                    h,\
+                                    0x21,\
+                                    0x84,\
+                                    0,\
+                                    IF_CTRL,\
+                                    NULL,\
+                                    0,\
+                                    3000\
+                                );\
+\
+                                unsigned char insz[4] = {\
+                                    0x00,0x40,0x00,0x00\
+                                };\
+\
+                                libusb_control_transfer(\
+                                    h,\
+                                    0x21,\
+                                    0x86,\
+                                    0,\
+                                    IF_CTRL,\
+                                    insz,\
+                                    sizeof(insz),\
+                                    3000\
+                                );\
+\
+                                struct bridge_ctx bc;\
+                                memset(&bc, 0, sizeof(bc));\
+\
+                                bc.h = h;\
+                                bc.utun_fd = utun_fd;\
+\
+                                pthread_t tx_thread;\
+                                pthread_t rx_thread;\
+\
+                                bridge_stop = 0;\
+                                signal(SIGINT, bridge_sigint);\
+\
+                                int txok = pthread_create(\
+                                    &tx_thread,\
+                                    NULL,\
+                                    utun_to_mbim,\
+                                    &bc\
+                                );\
+\
+                                int rxok = pthread_create(\
+                                    &rx_thread,\
+                                    NULL,\
+                                    mbim_to_utun,\
+                                    &bc\
+                                );\
+\
+                                if (txok == 0 &&\
+                                    rxok == 0) {\
+\
+                                    printf("\n");\
+                                    printf("***********************************************\n");\
+                                    printf("* LTE UTUN BRIDGE ESTE ACTIV                  *\n");\
+                                    printf("* Interface: %-31s*\n", ifname);\
+                                    printf("***********************************************\n");\
+\
+                                    printf("\nÃƒ®n TERMINALUL 2 ruleazÄƒ£:\n\n");\
+                                    printf("route -n get %s | grep interface\n",\
+                                           dnss);\
+                                    printf("dig @%s example.com A +short\n",\
+                                           dnss);\
+                                    printf("\nDupÄƒ£ test, revino aici Èƒ¹i apasÄƒ£ Ctrl-C.\n\n");\
+\
+                                    while (!bridge_stop)\
+                                        sleep(1);\
+\
+                                    bridge_stop = 1;\
+\
+                                    pthread_join(\
+                                        tx_thread,\
+                                        NULL\
+                                    );\
+\
+                                    pthread_join(\
+                                        rx_thread,\
+                                        NULL\
+                                    );\
+\
+                                    printf("\nBridge oprit.\n");\
+                                    printf("TX packets: %llu\n",\
+                                           bc.tx_packets);\
+                                    printf("RX packets: %llu\n",\
+                                           bc.rx_packets);\
+\
+                                } else {\
+                                    fprintf(stderr,\
+                                            "pthread_create a eÈƒ¹uat\n");\
+\
+                                    bridge_stop = 1;\
+\
+                                    if (txok == 0)\
+                                        pthread_join(\
+                                            tx_thread, NULL);\
+\
+                                    if (rxok == 0)\
+                                        pthread_join(\
+                                            rx_thread, NULL);\
+                                }\
+\
+                                /*\
+                                 * Èƒ¸tergem numai ruta de test.\
+                                 */\
+                                snprintf(\
+                                    cmd, sizeof(cmd),\
+                                    "/sbin/route -n delete -host %s -interface %s >/dev/null 2>&1",\
+                                    dnss, ifname\
+                                );\
+\
+                                system(cmd);\
+\
+                            } else {\
+                                printf("Nu am putut adÄƒ£uga ruta de test.\n");\
+                            }\
+                        } else {\
+                            printf("Nu am putut configura utun.\n");\
+                        }\
+\
+                        close(utun_fd);\
+\
+                        printf("UTUN Ã®nchis.\n");\
+                    }\
+                }\
+            }\
+        }\
+\
+'''\
+\
+if marker not in s:\
+    raise SystemExit("Nu gÄƒ£sesc markerul DEACTIVATE")\
+\
+s = s.replace(marker, bridge + marker, 1)\
+\
+open(p, "w").write(s)\
+PY\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_utun_bridge.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -lpthread \\
+  -o mbim_utun_bridge\
+\
+sudo ./mbim_utun_bridge
+route -n get 193.231.100.130 | grep interface\
+\
+dig @193.231.100.130 example.com A +short
+echo "===== DEFAULT ROUTE ====="\
+route -n get default\
+\
+echo\
+echo "===== DNS ACTUAL ====="\
+scutil --dns | head -100
+cd /tmp/em7455-test\
+\
+cp mbim_utun_bridge.c mbim_lte.c\
+\
+python3 <<'PY'\
+p = "mbim_lte.c"\
+s = open(p).read()\
+\
+# ------------------------------------------------------------\
+# 1. SystemConfiguration + CoreFoundation\
+# ------------------------------------------------------------\
+\
+needle = "#include <sys/sys_domain.h>"\
+\
+replacement = """#include <sys/sys_domain.h>\
+#include <CoreFoundation/CoreFoundation.h>\
+#include <SystemConfiguration/SystemConfiguration.h>"""\
+\
+if needle not in s:\
+    raise SystemExit("Nu gÄƒ£sesc header-ele utun")\
+\
+s = s.replace(needle, replacement, 1)\
+\
+# ------------------------------------------------------------\
+# 2. Helper pentru publicarea temporarÄƒ£ IPv4 + DNS\
+# ------------------------------------------------------------\
+\
+needle = "static volatile sig_atomic_t bridge_stop = 0;"\
+\
+helper = r'''\
+static SCDynamicStoreRef publish_lte_state(\
+    const char *ifname,\
+    const char *ip,\
+    const char *gateway,\
+    const char *dns1,\
+    const char *dns2)\
+{\
+    SCDynamicStoreRef store = NULL;\
+\
+    CFStringRef cf_if = NULL;\
+    CFStringRef cf_ip = NULL;\
+    CFStringRef cf_gw = NULL;\
+    CFStringRef cf_dns1 = NULL;\
+    CFStringRef cf_dns2 = NULL;\
+\
+    CFStringRef service = NULL;\
+    CFStringRef ipv4_key = NULL;\
+    CFStringRef dns_key = NULL;\
+\
+    CFMutableDictionaryRef ipv4 = NULL;\
+    CFMutableDictionaryRef dns = NULL;\
+\
+    CFArrayRef addresses = NULL;\
+    CFArrayRef masks = NULL;\
+    CFArrayRef servers = NULL;\
+    CFArrayRef match_domains = NULL;\
+\
+    CFNumberRef one = NULL;\
+    CFNumberRef order = NULL;\
+\
+    int one_i = 1;\
+    int order_i = 1;\
+\
+    store = SCDynamicStoreCreate(\
+        NULL,\
+        CFSTR("EM7455 LTE"),\
+        NULL,\
+        NULL\
+    );\
+\
+    if (!store) {\
+        fprintf(stderr, "SCDynamicStoreCreate a eÈƒ¹uat\n");\
+        return NULL;\
+    }\
+\
+    cf_if = CFStringCreateWithCString(\
+        NULL, ifname, kCFStringEncodingUTF8);\
+\
+    cf_ip = CFStringCreateWithCString(\
+        NULL, ip, kCFStringEncodingUTF8);\
+\
+    cf_gw = CFStringCreateWithCString(\
+        NULL, gateway, kCFStringEncodingUTF8);\
+\
+    cf_dns1 = CFStringCreateWithCString(\
+        NULL, dns1, kCFStringEncodingUTF8);\
+\
+    cf_dns2 = CFStringCreateWithCString(\
+        NULL, dns2, kCFStringEncodingUTF8);\
+\
+    service = CFStringCreateWithFormat(\
+        NULL,\
+        NULL,\
+        CFSTR("State:/Network/Service/EM7455-LTE-%@"),\
+        cf_if\
+    );\
+\
+    ipv4_key = CFStringCreateWithFormat(\
+        NULL, NULL, CFSTR("%@/IPv4"), service);\
+\
+    dns_key = CFStringCreateWithFormat(\
+        NULL, NULL, CFSTR("%@/DNS"), service);\
+\
+    /* ---------------- IPv4 state ---------------- */\
+\
+    ipv4 = CFDictionaryCreateMutable(\
+        NULL,\
+        0,\
+        &kCFTypeDictionaryKeyCallBacks,\
+        &kCFTypeDictionaryValueCallBacks\
+    );\
+\
+    const void *addr_values[] = { cf_ip };\
+\
+    addresses = CFArrayCreate(\
+        NULL,\
+        addr_values,\
+        1,\
+        &kCFTypeArrayCallBacks\
+    );\
+\
+    CFStringRef mask = CFSTR("255.255.255.252");\
+    const void *mask_values[] = { mask };\
+\
+    masks = CFArrayCreate(\
+        NULL,\
+        mask_values,\
+        1,\
+        &kCFTypeArrayCallBacks\
+    );\
+\
+    one = CFNumberCreate(\
+        NULL,\
+        kCFNumberIntType,\
+        &one_i\
+    );\
+\
+    CFDictionarySetValue(\
+        ipv4, CFSTR("Addresses"), addresses);\
+\
+    CFDictionarySetValue(\
+        ipv4, CFSTR("SubnetMasks"), masks);\
+\
+    CFDictionarySetValue(\
+        ipv4, CFSTR("Router"), cf_gw);\
+\
+    CFDictionarySetValue(\
+        ipv4, CFSTR("InterfaceName"), cf_if);\
+\
+    CFDictionarySetValue(\
+        ipv4, CFSTR("OverridePrimary"), one);\
+\
+    /* ---------------- DNS state ---------------- */\
+\
+    dns = CFDictionaryCreateMutable(\
+        NULL,\
+        0,\
+        &kCFTypeDictionaryKeyCallBacks,\
+        &kCFTypeDictionaryValueCallBacks\
+    );\
+\
+    const void *server_values[2];\
+    CFIndex server_count = 1;\
+\
+    server_values[0] = cf_dns1;\
+\
+    if (dns2 && dns2[0] && strcmp(dns1, dns2) != 0) {\
+        server_values[1] = cf_dns2;\
+        server_count = 2;\
+    }\
+\
+    servers = CFArrayCreate(\
+        NULL,\
+        server_values,\
+        server_count,\
+        &kCFTypeArrayCallBacks\
+    );\
+\
+    /*\
+     * Domeniul gol => resolver implicit.\
+     */\
+    const void *domain_values[] = { CFSTR("") };\
+\
+    match_domains = CFArrayCreate(\
+        NULL,\
+        domain_values,\
+        1,\
+        &kCFTypeArrayCallBacks\
+    );\
+\
+    order = CFNumberCreate(\
+        NULL,\
+        kCFNumberIntType,\
+        &order_i\
+    );\
+\
+    CFDictionarySetValue(\
+        dns,\
+        CFSTR("ServerAddresses"),\
+        servers\
+    );\
+\
+    CFDictionarySetValue(\
+        dns,\
+        CFSTR("SupplementalMatchDomains"),\
+        match_domains\
+    );\
+\
+    CFDictionarySetValue(\
+        dns,\
+        CFSTR("SupplementalMatchDomainsNoSearch"),\
+        one\
+    );\
+\
+    CFDictionarySetValue(\
+        dns,\
+        CFSTR("SearchOrder"),\
+        order\
+    );\
+\
+    /*\
+     * Valorile sunt TEMPORARE Èƒ¹i aparÈƒ»in acestei\
+     * sesiuni SCDynamicStore.\
+     */\
+    Boolean ok_ipv4 =\
+        SCDynamicStoreAddTemporaryValue(\
+            store,\
+            ipv4_key,\
+            ipv4\
+        );\
+\
+    Boolean ok_dns =\
+        SCDynamicStoreAddTemporaryValue(\
+            store,\
+            dns_key,\
+            dns\
+        );\
+\
+    if (!ok_ipv4 || !ok_dns) {\
+        fprintf(\
+            stderr,\
+            "Publicarea SystemConfiguration a eÈƒ¹uat: %s\n",\
+            SCErrorString(SCError())\
+        );\
+\
+        CFRelease(store);\
+        store = NULL;\
+    } else {\
+        printf("SystemConfiguration LTE publicat temporar.\n");\
+        printf("DNS LTE: %s, %s\n", dns1, dns2);\
+    }\
+\
+    if (order) CFRelease(order);\
+    if (one) CFRelease(one);\
+\
+    if (match_domains) CFRelease(match_domains);\
+    if (servers) CFRelease(servers);\
+    if (masks) CFRelease(masks);\
+    if (addresses) CFRelease(addresses);\
+\
+    if (dns) CFRelease(dns);\
+    if (ipv4) CFRelease(ipv4);\
+\
+    if (dns_key) CFRelease(dns_key);\
+    if (ipv4_key) CFRelease(ipv4_key);\
+    if (service) CFRelease(service);\
+\
+    if (cf_dns2) CFRelease(cf_dns2);\
+    if (cf_dns1) CFRelease(cf_dns1);\
+    if (cf_gw) CFRelease(cf_gw);\
+    if (cf_ip) CFRelease(cf_ip);\
+    if (cf_if) CFRelease(cf_if);\
+\
+    return store;\
+}\
+\
+'''\
+\
+s = s.replace(\
+    needle,\
+    helper + "\n" + needle,\
+    1\
+)\
+\
+# ------------------------------------------------------------\
+# 3. AdÄƒ£ugÄƒ£m DNS2\
+# ------------------------------------------------------------\
+\
+old = "char srcs[32], gws[32], dnss[32];"\
+new = "char srcs[32], gws[32], dnss[32], dns2s[32];"\
+\
+if old not in s:\
+    raise SystemExit("Nu gÄƒ£sesc declaraÈƒ»ia adreselor")\
+\
+s = s.replace(old, new, 1)\
+\
+old = """                    snprintf(dnss, sizeof(dnss),\
+                             "%u.%u.%u.%u",\
+                             dns[0],dns[1],dns[2],dns[3]);\
+"""\
+\
+new = """                    snprintf(dnss, sizeof(dnss),\
+                             "%u.%u.%u.%u",\
+                             dns[0],dns[1],dns[2],dns[3]);\
+\
+                    if (dnscount > 1 &&\
+                        dnsoff + 8 <= infolen) {\
+                        unsigned char *dns2 = ipcfg + dnsoff + 4;\
+\
+                        snprintf(dns2s, sizeof(dns2s),\
+                                 "%u.%u.%u.%u",\
+                                 dns2[0],dns2[1],dns2[2],dns2[3]);\
+                    } else {\
+                        snprintf(dns2s, sizeof(dns2s),\
+                                 "%s", dnss);\
+                    }\
+"""\
+\
+if old not in s:\
+    raise SystemExit("Nu gÄƒ£sesc construirea DNS1")\
+\
+s = s.replace(old, new, 1)\
+\
+# ------------------------------------------------------------\
+# 4. Ãƒ®nlocuim ruta de TEST cÄƒ£tre un singur DNS\
+#    cu douÄƒ£ /1 care acoperÄƒ£ tot IPv4\
+# ------------------------------------------------------------\
+\
+old = """/sbin/route -n add -host %s -interface %s"""\
+new = """/sbin/route -n add -net 0.0.0.0/1 -interface %s && /sbin/route -n add -net 128.0.0.0/1 -interface %s"""\
+\
+if old not in s:\
+    raise SystemExit("Nu gÄƒ£sesc ruta de test")\
+\
+s = s.replace(old, new, 1)\
+\
+# Argumentele snprintf erau dnss, ifname.\
+# Acum trebuie ifname, ifname.\
+old = """                                dnss, ifname\
+                            );"""\
+\
+new = """                                ifname, ifname\
+                            );"""\
+\
+if old not in s:\
+    raise SystemExit("Nu gÄƒ£sesc argumentele rutei")\
+\
+s = s.replace(old, new, 1)\
+\
+# ------------------------------------------------------------\
+# 5. PublicÄƒ£m DNS/IPv4 dupÄƒ£ instalarea rutelor\
+# ------------------------------------------------------------\
+\
+needle = """                            if (rr == 0) {\
+\
+                                /*\
+                                 * Explicit NTB16 + input buffer.\
+                                 */\
+"""\
+\
+replacement = """                            if (rr == 0) {\
+\
+                                SCDynamicStoreRef lte_store =\
+                                    publish_lte_state(\
+                                        ifname,\
+                                        srcs,\
+                                        gws,\
+                                        dnss,\
+                                        dns2s\
+                                    );\
+\
+                                if (!lte_store) {\
+                                    fprintf(stderr,\
+                                            "ATENÈƒºIE: DNS LTE nu a fost publicat.\\n");\
+                                }\
+\
+                                /*\
+                                 * Explicit NTB16 + input buffer.\
+                                 */\
+"""\
+\
+if needle not in s:\
+    raise SystemExit("Nu gÄƒ£sesc Ã®nceputul bridge-ului")\
+\
+s = s.replace(needle, replacement, 1)\
+\
+# ------------------------------------------------------------\
+# 6. Mesajele pentru Terminal 2\
+# ------------------------------------------------------------\
+\
+old = """                                    printf("\\nÃƒ®n TERMINALUL 2 ruleazÄƒ£:\\n\\n");\
+                                    printf("route -n get %s | grep interface\\n",\
+                                           dnss);\
+                                    printf("dig @%s example.com A +short\\n",\
+                                           dnss);\
+                                    printf("\\nDupÄƒ£ test, revino aici Èƒ¹i apasÄƒ£ Ctrl-C.\\n\\n");\
+"""\
+\
+new = """                                    printf("\\nÃƒ®n TERMINALUL 2 ruleazÄƒ£:\\n\\n");\
+                                    printf("route -n get 1.1.1.1 | grep interface\\n");\
+                                    printf("scutil --dns | head -60\\n");\
+                                    printf("dig example.com A +short\\n");\
+                                    printf("curl -4 -I https://example.com\\n");\
+                                    printf("\\nDacÄƒ£ merg, poÈƒ»i testa Èƒ¹i Safari.\\n");\
+                                    printf("Pentru oprire revino aici Èƒ¹i apasÄƒ£ Ctrl-C.\\n\\n");\
+"""\
+\
+if old not in s:\
+    raise SystemExit("Nu gÄƒ£sesc instrucÈƒ»iunile Terminal 2")\
+\
+s = s.replace(old, new, 1)\
+\
+# ------------------------------------------------------------\
+# 7. Cleanup: eliberÄƒ£m SystemConfiguration Èƒ¹i cele douÄƒ£ rute\
+# ------------------------------------------------------------\
+\
+old = """                                /*\
+                                 * Èƒ¸tergem numai ruta de test.\
+                                 */\
+                                snprintf(\
+                                    cmd, sizeof(cmd),\
+                                    "/sbin/route -n delete -host %s -interface %s >/dev/null 2>&1",\
+                                    dnss, ifname\
+                                );\
+\
+                                system(cmd);\
+"""\
+\
+new = """                                /*\
+                                 * Eliberarea sesiunii Èƒ¹terge valorile\
+                                 * temporare SystemConfiguration.\
+                                 */\
+                                if (lte_store) {\
+                                    CFRelease(lte_store);\
+                                    lte_store = NULL;\
+                                    printf("DNS/SystemConfiguration LTE eliminat.\\n");\
+                                }\
+\
+                                /*\
+                                 * EliminÄƒ£m numai rutele /1 create de noi.\
+                                 * Default route original nu a fost modificat.\
+                                 */\
+                                snprintf(\
+                                    cmd, sizeof(cmd),\
+                                    "/sbin/route -n delete -net 0.0.0.0/1 -interface %s >/dev/null 2>&1; "\
+                                    "/sbin/route -n delete -net 128.0.0.0/1 -interface %s >/dev/null 2>&1",\
+                                    ifname, ifname\
+                                );\
+\
+                                system(cmd);\
+\
+                                printf("Rutele LTE eliminate.\\n");\
+"""\
+\
+if old not in s:\
+    raise SystemExit("Nu gÄƒ£sesc cleanup-ul rutei")\
+\
+s = s.replace(old, new, 1)\
+\
+open(p, "w").write(s)\
+\
+print("mbim_lte.c creat")\
+PY\
+\
+USBPREFIX="$(brew --prefix libusb)"\
+\
+clang mbim_lte.c \\
+  -I"$USBPREFIX/include/libusb-1.0" \\
+  -L"$USBPREFIX/lib" \\
+  -lusb-1.0 \\
+  -lpthread \\
+  -framework SystemConfiguration \\
+  -framework CoreFoundation \\
+  -o mbim_lte\
+\
+sudo ./mbim_lte
+route -n get 1.1.1.1 | grep interface\
+\
+scutil --dns | head -60\
+\
+dig example.com A +short\
+\
+curl -4 -I https://example.com
+curl -4 -I https://example.com
+cd /tmp/em7455-test\
+sudo ./mbim_dualstack_test
+cd /tmp/em7455-test\
+\
+cp mbim_activate.c mbim_dualstack_test.c\
+\
+python3 <<'PY'\
+p = "mbim_dualstack_test.c"\
+s = open(p).read()\
+\
+# inet_ntop pentru afiÈƒ¹area adreselor IPv6\
+if "#include <arpa/inet.h>" not in s:\
+    s = s.replace(\
+        "#include <libusb.h>",\
+        "#include <libusb.h>\n#include <arpa/inet.h>",\
+        1\
+    )\
+\
+# CONNECT: IPv4 -> IPv4v6\
+s = s.replace(\
+    "put32(ci + 40, 1);       /* IP type IPv4 */",\
+    "put32(ci + 40, 3);       /* IP type IPv4v6 */",\
+    1\
+)\
+\
+s = s.replace(\
+    "put32(ci + 40, 1);       /* IPv4 */",\
+    "put32(ci + 40, 3);       /* IPv4v6 */",\
+    1\
+)\
+\
+# DEACTIVATE cu acelaÈƒ¹i IP type\
+s = s.replace(\
+    "put32(di + 40, 1);          /* IPv4 */",\
+    "put32(di + 40, 3);          /* IPv4v6 */",\
+    1\
+)\
+\
+s = s.replace(\
+    'printf("IP type : IPv4\\n");',\
+    'printf("IP type : IPv4v6\\n");',\
+    1\

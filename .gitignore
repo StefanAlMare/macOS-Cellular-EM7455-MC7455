@@ -1,0 +1,6 @@
+Release/
+.DS_Store
+*.pkg
+*.dSYM/
+DerivedData/
+.build/
