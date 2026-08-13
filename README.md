@@ -1,5 +1,7 @@
 # macOS-Cellular-EM7455
 
+[![Build](https://github.com/StefanAlMare/macOS-Cellular-EM7455/actions/workflows/build.yml/badge.svg)](https://github.com/StefanAlMare/macOS-Cellular-EM7455/actions/workflows/build.yml)
+
 A user-space cellular networking stack for **modern macOS** using the internal **Sierra Wireless EM7455 / Dell DW5811e** WWAN modem.
 
 This project restores practical cellular data connectivity on macOS systems where the modem is visible over USB but macOS no longer provides a usable native WWAN networking path for this hardware.
@@ -23,13 +25,13 @@ The current implementation speaks **MBIM/NCM directly through libusb**, creates 
 | APN Auto | ✅ Validated | Per-carrier cache + active-context verification |
 | Signal bars / dBm | ✅ Validated | Live modem telemetry |
 | Automatic fallback | ✅ Validated | Cellular starts when Ethernet + Wi-Fi are unavailable |
-| `.pkg` packaging | 🧪 Package-ready | Builder is included; clean-install validation is the next release gate |
+| `.pkg` packaging | ✅ CI build validated / 🧪 hardware clean-install pending | GitHub Actions builds the self-contained package successfully; clean-install validation on target hardware remains the release gate |
 | Cellular IPv6 | ⚠️ Carrier unavailable in current tests | Engine/UI are prepared for future work, but current tested SIMs did not receive IPv6 |
-| Native macOS WWAN integration | 🚧 Help wanted | See [Developer Call](Docs/DEVELOPER-CALL.md) |
+| Native macOS WWAN integration | 🚧 Help wanted | See [Developer Call](Docs/DEVELOPER-CALL.md) and [Issue #1](https://github.com/StefanAlMare/macOS-Cellular-EM7455/issues/1) |
 
 ### macOS validation
 
-The current hardware validation was performed on a **Dell Precision 7720 Hackintosh running macOS Tahoe 26.6.1 (25G76)**.
+The current hardware validation was performed on a **Dell Precision 7720 Hackintosh running macOS Tahoe**. Exact compatibility with other macOS builds should be reported separately rather than assumed.
 
 The code targets modern macOS APIs and the package builder currently targets **Intel/x86_64**.
 
@@ -248,7 +250,7 @@ Experienced macOS, DriverKit, NetworkExtension, IOKit, USB, MBIM/NCM and cellula
 - Can native IPv6 RA/DHCPv6 handling be implemented when the carrier provides it?
 - Can the hardware support be generalized safely beyond EM7455/DW5811e?
 
-Please read [Docs/DEVELOPER-CALL.md](Docs/DEVELOPER-CALL.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+Please read [Docs/DEVELOPER-CALL.md](Docs/DEVELOPER-CALL.md), [CONTRIBUTING.md](CONTRIBUTING.md), and join the discussion in [Issue #1](https://github.com/StefanAlMare/macOS-Cellular-EM7455/issues/1).
 
 ## Known limitations
 
