@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - 'release/*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libusb
+        run: brew install libusb
+
+      - name: Build package
+        run: |
+          cd Installer
+          chmod +x build-pkg.sh
+          ./build-pkg.sh
+
+      - name: Prepare release assets
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#release/}"
+          TAG="v${VERSION}"
+          PKG="Installer/Release/Cellular-${VERSION}.pkg"
+          SUM="Installer/Release/Cellular-${VERSION}.sha256.txt"
+
+          if [[ ! -f "$PKG" ]]; then
+            echo "Expected package not found: $PKG" >&2
+            exit 1
+          fi
+
+          shasum -a 256 "$PKG" | tee "$SUM"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "pkg=$PKG" >> "$GITHUB_OUTPUT"
+          echo "sum=$SUM" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > /tmp/release-notes.md <<'EOF'
+          # Cellular 2.6.2 — first public release
+
+          This is the first installable public release of the user-space macOS Cellular stack developed and hardware-tested with a Dell DW5811e / Sierra Wireless EM7455B.
+
+          ## Validated hardware
+
+          This binary release is specifically validated for:
+
+          - Dell Precision 7720
+          - Dell DW5811e / Sierra Wireless EM7455B
+          - Sierra Generic USB identity `1199:9071`
+          - AT interface 3 (`0x03` OUT / `0x84` IN)
+          - MBIM control interface 12
+          - MBIM/NCM data interface 13 (`0x04` OUT / `0x86` IN)
+          - Intel/x86_64 macOS
+
+          The current production engine has this VID/PID, interface layout and endpoints compiled into it.
+
+          **Other WWAN hardware is not supported by this binary release.** You may experiment with the source code on other MBIM devices, but a different Sierra, Quectel, Fibocom or other modem may require VID/PID changes, dynamic interface discovery, endpoint changes, NCM validation and additional testing. The presence of an M.2 WWAN slot alone does not imply compatibility.
+
+          ## What works on the validated hardware
+
+          - MBIM bearer activation/deactivation
+          - real IPv4 Internet traffic through a macOS `utun` interface
+          - DNS and temporary SystemConfiguration publication
+          - automatic Ethernet/Wi-Fi fallback
+          - manual connect/disconnect
+          - carrier display
+          - live signal bars and dBm
+          - APN learning/cache based on the active bearer
+          - graceful cleanup on disconnect
+          - self-contained package with bundled libusb
+
+          ## IPv6
+
+          Cellular IPv6 plumbing has been investigated, but the tested SIMs/carriers did not provide native IPv6. `IPv4v6` requests were downgraded to IPv4 and `IPv6-only` requests were rejected. Ethernet/Wi-Fi IPv6 is not disabled or modified by Cellular.
+
+          IPv6 should therefore be considered **not yet hardware/carrier validated for Cellular data**.
+
+          ## Firmware note
+
+          The development card was manually reflashed/modified and ultimately validated with Sierra Generic firmware/PRI:
+
+          - `SWI9X30C_02.39.00.00`
+          - `002.085_000`
+
+          Vendor firmware is not included in this release. Do not flash firmware or change USB composition merely to try this package unless you understand the recovery path for your exact modem.
+
+          ## Installation
+
+          Download `Cellular-2.6.2.pkg` from the Assets section and install it normally.
+
+          The package installs a privileged helper/LaunchDaemon because direct modem access and network setup require elevated privileges.
+
+          This GitHub-built package is generated without the maintainer's private Developer ID certificates, so it may be ad-hoc/unsigned at the installer-package level and is not notarized. Gatekeeper may warn on first launch/install. Do **not** disable Gatekeeper globally. If Finder refuses the package, use macOS's normal contextual Open flow or install from Terminal:
+
+          ```bash
+          sudo installer -pkg ~/Downloads/Cellular-2.6.2.pkg -target /
+          ```
+
+          ## Uninstall
+
+          ```bash
+          sudo "/Library/Application Support/CellularLTE/uninstall.sh"
+          ```
+
+          ## Developers wanted
+
+          Contributions are especially welcome for DriverKit / NetworkExtension architecture, dynamic MBIM device discovery, power management, additional modem support, native WWAN integration and real carrier IPv6 validation.
+
+          See `Docs/DEVELOPER-CALL.md`, `Docs/HARDWARE.md`, `Docs/FIRMWARE.md`, `Docs/IPV6.md` and Issue #1.
+
+          ## Security / privacy
+
+          Do not post IMEI, IMSI, ICCID, phone numbers or subscriber secrets in issues or logs.
+          EOF
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.prep.outputs.tag }}"
+          VERSION="${{ steps.prep.outputs.version }}"
+          PKG="${{ steps.prep.outputs.pkg }}"
+          SUM="${{ steps.prep.outputs.sum }}"
+
+          gh release create "$TAG" \
+            "$PKG" \
+            "$SUM" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Cellular ${VERSION} — First Public Release" \
+            --notes-file /tmp/release-notes.md
