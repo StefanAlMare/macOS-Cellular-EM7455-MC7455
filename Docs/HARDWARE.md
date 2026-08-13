@@ -5,7 +5,7 @@
 - Dell Precision 7720
 - internal M.2 WWAN slot
 - Dell DW5811e / Sierra Wireless EM7455B
-- tested on macOS Tahoe 26.6.1 (25G76)
+- tested on macOS Tahoe (exact build should be reported separately for each hardware validation)
 
 ## USB identities observed during the project
 
