@@ -3,13 +3,13 @@
 Recommended GitHub repository:
 
 ```text
-StefanAlMare/macOS-Cellular-EM7455
+StefanAlMare/macOS-Cellular-EM7455-MC7455
 ```
 
 Description:
 
 ```text
-User-space MBIM/NCM cellular networking for modern macOS using Sierra Wireless EM7455 / Dell DW5811e, with Cellular.app, auto fallback and macOS .pkg builder.
+Cellular LTE for modern macOS using Sierra Wireless EM7455/DW5811e (M.2) and MC7455 (Mini PCIe) via MBIM/NCM.
 ```
 
 Suggested topics:
@@ -22,6 +22,7 @@ wwan
 mbim
 cdc-ncm
 em7455
+mc7455
 dw5811e
 sierra-wireless
 libusb
