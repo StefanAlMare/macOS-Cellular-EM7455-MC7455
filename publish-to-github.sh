@@ -2,9 +2,9 @@
 set -euo pipefail
 
 OWNER="StefanAlMare"
-REPO="macOS-Cellular-EM7455"
+REPO="macOS-Cellular-EM7455-MC7455"
 FULL="$OWNER/$REPO"
-DESCRIPTION="User-space MBIM/NCM cellular networking for modern macOS using Sierra Wireless EM7455 / Dell DW5811e, with Cellular.app, auto fallback and macOS .pkg builder."
+DESCRIPTION="Cellular LTE for modern macOS using Sierra Wireless EM7455/DW5811e (M.2) and MC7455 (Mini PCIe) via MBIM/NCM."
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
 
@@ -48,7 +48,7 @@ if [[ ! -d .git ]]; then
   git config user.name "$OWNER"
   git config user.email "92223268+StefanAlMare@users.noreply.github.com"
   git add .
-  git commit -m "Initial public release of macOS Cellular EM7455"
+  git commit -m "Initial public release of macOS Cellular EM7455/MC7455"
 fi
 
 if gh repo view "$FULL" >/dev/null 2>&1; then
@@ -58,6 +58,7 @@ if gh repo view "$FULL" >/dev/null 2>&1; then
     git remote add origin "https://github.com/$FULL.git"
   fi
 
+  git remote set-url origin "https://github.com/$FULL.git"
   git branch -M main
   git push -u origin main
 else
@@ -79,6 +80,7 @@ gh repo edit "$FULL" \
   --add-topic mbim \
   --add-topic cdc-ncm \
   --add-topic em7455 \
+  --add-topic mc7455 \
   --add-topic dw5811e \
   --add-topic sierra-wireless \
   --add-topic libusb \
