@@ -1,7 +1,7 @@
 # Credits and provenance
 
-- **StefanAlMare** — project owner; Dell Precision 7720/EM7455 hardware; manual firmware modification/reflash; test execution; debugging; validation and project direction.
-- **Sierra Wireless / Semtech** — EM7455 hardware, firmware packages, product documentation and AT-command documentation.
+- **StefanAlMare** — project owner; Dell Precision 7720/EM7455 and Dell Precision M6800/MC7455 hardware; manual firmware modification/reflash; test execution; debugging; validation and project direction.
+- **Sierra Wireless / Semtech** — EM7455/MC7455 hardware, firmware packages, product documentation and AT-command documentation.
 - **USB Implementers Forum (USB-IF)** — CDC-NCM and Mobile Broadband Interface Model specifications.
 - **Linux kernel networking developers** — reference behaviour for CDC-NCM/MBIM USB initialization and data handling.
 - **libmbim and ModemManager contributors** — open implementations and tooling that make MBIM behaviour inspectable across platforms.
