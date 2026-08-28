@@ -4,7 +4,7 @@ This repository is intentionally public because the current implementation solve
 
 ## What has already been proven
 
-On real EM7455/DW5811e hardware, modern macOS can:
+On real **Dell DW5811e / Sierra EM7455B (M.2)** and **Sierra MC7455 (Mini PCIe)** hardware, modern macOS can:
 
 - control the modem through MBIM using libusb;
 - activate and deactivate a mobile data bearer;
@@ -15,7 +15,9 @@ On real EM7455/DW5811e hardware, modern macOS can:
 - monitor carrier and signal strength;
 - perform automatic fallback against Ethernet/Wi-Fi.
 
-So the radio/modem problem is substantially solved.
+Both validated cards use the same Sierra Generic `1199:9071` production layout. The MC7455 worked with the existing application unchanged after preparation with Generic firmware/PRI and USB composition 8 (`DM / NMEA / AT / MBIM`).
+
+So the radio/modem problem is substantially solved for this validated Sierra 9X30 layout.
 
 ## What is missing
 
@@ -37,7 +39,7 @@ Can SIM/carrier/signal/APN state be surfaced in macOS in a first-class way rathe
 
 ### Generic MBIM device discovery
 
-The current project hardcodes the validated EM7455 layout. A robust implementation should discover descriptors, interfaces and endpoints instead of assuming `IF12/IF13` and fixed endpoints.
+The current project expects the validated Sierra Generic layout. A robust implementation should discover descriptors, interfaces and endpoints instead of assuming `IF12/IF13` and fixed endpoints.
 
 ### IPv6
 
