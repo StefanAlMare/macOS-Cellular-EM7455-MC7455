@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — MC7455 Mini PCIe validation
+
+- validated the existing Cellular.app unchanged with Sierra Wireless MC7455 in Dell Precision M6800
+- validated Sierra Generic `SWI9X30C_02.39.00.00 / PRI 002.085_000`
+- moved the tested MC7455 from shipped/default USB composition 7 to composition 8 (`DM / NMEA / AT / MBIM`)
+- confirmed the same `1199:9071`, IF3/IF12/IF13 and endpoint layout already used by the EM7455 engine
+- validated real LTE data in Ubuntu, Windows and macOS Tahoe
+- documented M6800-specific Mini PCIe pin isolation and antenna findings
+- renamed repository to `macOS-Cellular-EM7455-MC7455`
+
 ## 2.6.2 — package-ready / IPv6-aware UI
 
 - package builder for self-contained target installation
