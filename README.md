@@ -1,6 +1,6 @@
 # macOS Cellular — Sierra EM7455 / MC7455
 
-[![Build](https://github.com/StefanAlMare/macOS-Cellular-EM7455/actions/workflows/build.yml/badge.svg)](https://github.com/StefanAlMare/macOS-Cellular-EM7455/actions/workflows/build.yml)
+[![Build](https://github.com/StefanAlMare/macOS-Cellular-EM7455-MC7455/actions/workflows/build.yml/badge.svg)](https://github.com/StefanAlMare/macOS-Cellular-EM7455-MC7455/actions/workflows/build.yml)
 
 A user-space cellular networking stack for **modern macOS** using Sierra Wireless **EM7455 / Dell DW5811e (M.2)** and **MC7455 (Mini PCIe)** WWAN modems.
 
@@ -28,7 +28,7 @@ The implementation speaks **MBIM/NCM directly through libusb**, creates a macOS 
 | Automatic fallback | ✅ Validated | Cellular starts when Ethernet + Wi-Fi are unavailable |
 | `.pkg` packaging | ✅ CI build validated / 🧪 hardware clean-install pending | GitHub Actions builds the self-contained package successfully |
 | Cellular IPv6 | ⚠️ Carrier unavailable in current tests | Engine/UI are prepared; tested bearers returned IPv4 only |
-| Native macOS WWAN integration | 🚧 Help wanted | See [Developer Call](Docs/DEVELOPER-CALL.md) and [Issue #1](https://github.com/StefanAlMare/macOS-Cellular-EM7455/issues/1) |
+| Native macOS WWAN integration | 🚧 Help wanted | See [Developer Call](Docs/DEVELOPER-CALL.md) and [Issue #1](https://github.com/StefanAlMare/macOS-Cellular-EM7455-MC7455/issues/1) |
 
 ## New: MC7455 Mini PCIe validation
 
@@ -253,7 +253,7 @@ The current stack proves that the hardware can be controlled and can carry real 
 
 Experienced macOS, DriverKit, NetworkExtension, IOKit, USB, MBIM/NCM and cellular developers are invited to help with native interface integration, system-extension architecture, carrier/APN/SIM UI integration and future IPv6 work.
 
-Please read [Docs/DEVELOPER-CALL.md](Docs/DEVELOPER-CALL.md), [CONTRIBUTING.md](CONTRIBUTING.md), and join the discussion in [Issue #1](https://github.com/StefanAlMare/macOS-Cellular-EM7455/issues/1).
+Please read [Docs/DEVELOPER-CALL.md](Docs/DEVELOPER-CALL.md), [CONTRIBUTING.md](CONTRIBUTING.md), and join the discussion in [Issue #1](https://github.com/StefanAlMare/macOS-Cellular-EM7455-MC7455/issues/1).
 
 ## Known limitations
 
