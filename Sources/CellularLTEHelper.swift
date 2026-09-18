@@ -64,7 +64,7 @@ final class LinkState: @unchecked Sendable {
 }
 
 final class CellularLTEHelper {
-    private let version = "2.6.2-pkg-ready"
+    private let version = "2.6.3-lifecycle-control"
 
     private let supportDir = "/Library/Application Support/CellularLTE"
     private let commandsDir = "/Library/Application Support/CellularLTE/Commands"
@@ -73,6 +73,7 @@ final class CellularLTEHelper {
     private let apnCachePath = "/Library/Application Support/CellularLTE/apn-cache.tsv"
     private let helperLogPath = "/Library/Application Support/CellularLTE/helper.log"
     private let engineLogPath = "/Library/Application Support/CellularLTE/engine.log"
+    private let runtimeMarkerPath = "/Library/Application Support/CellularLTE/runtime-active"
 
     private let enginePath = "/Library/PrivilegedHelperTools/ro.alexd.mbim_lte"
     private let statusPath = "/Library/PrivilegedHelperTools/ro.alexd.em7455_status"
@@ -112,6 +113,40 @@ final class CellularLTEHelper {
          * Helper-ul doar OBSERVA cele doua tipuri de cale.
          */
         log("Helper \(version) started. Auto=\(autoEnabled ? 1 : 0)")
+    }
+
+
+    private func runtimeOwnerPID() -> pid_t? {
+        guard
+            let text = try? String(
+                contentsOfFile: runtimeMarkerPath,
+                encoding: .utf8
+            ),
+            let value = Int32(
+                text.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+            ),
+            value > 0
+        else {
+            return nil
+        }
+
+        return value
+    }
+
+    private func runtimeOwnerIsAlive() -> Bool {
+        guard let pid = runtimeOwnerPID() else {
+            return false
+        }
+
+        errno = 0
+
+        if kill(pid, 0) == 0 {
+            return true
+        }
+
+        return errno == EPERM
     }
 
     private func ensureFilesystem() {
@@ -1137,7 +1172,19 @@ final class CellularLTEHelper {
         let startupGraceUntil = Date().addingTimeInterval(3)
 
         while true {
+            var shouldStop = false
+
             autoreleasepool {
+                /*
+                 * Cellular.app owns the runtime marker. If the app has
+                 * quit, crashed, logged out, or removed the marker,
+                 * the privileged helper must become inert as well.
+                 */
+                guard runtimeOwnerIsAlive() else {
+                    shouldStop = true
+                    return
+                }
+
                 processCommands()
 
                 if Date() >= startupGraceUntil {
@@ -1148,6 +1195,22 @@ final class CellularLTEHelper {
                 querySignal()
                 queryActiveAPN()
                 writeState()
+            }
+
+            if shouldStop {
+                log(
+                    "Cellular.app is not active; stopping Cellular stack."
+                )
+
+                stopEngine(reason: "app-not-running")
+
+                try? FileManager.default.removeItem(
+                    atPath: runtimeMarkerPath
+                )
+
+                lastAction = "helper-stopped"
+                writeState()
+                break
             }
 
             Thread.sleep(forTimeInterval: 0.5)
