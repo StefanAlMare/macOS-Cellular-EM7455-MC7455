@@ -12,10 +12,16 @@
     </array>
 
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
 
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>PathState</key>
+        <dict>
+            <key>/Library/Application Support/CellularLTE/runtime-active</key>
+            <true/>
+        </dict>
+    </dict>
 
     <key>ProcessType</key>
     <string>Background</string>
