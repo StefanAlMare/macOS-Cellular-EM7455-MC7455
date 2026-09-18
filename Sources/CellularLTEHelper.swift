@@ -106,7 +106,15 @@ final class CellularLTEHelper {
     init() {
         ensureFilesystem()
         autoEnabled = loadAutoSetting()
-        startNetworkMonitoring()
+
+        /*
+         * launchd may load the job speculatively. Do not even start
+         * Network.framework monitoring unless Cellular.app owns an
+         * active runtime marker.
+         */
+        if runtimeOwnerIsAlive() {
+            startNetworkMonitoring()
+        }
 
         /*
          * Nu atingem Wi-Fi/Ethernet in niciun fel.
