@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-VERSION="2.6.2"
+VERSION="2.6.3"
 PKG_ID="ro.alexd.Cellular"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$HERE/.." && pwd)"
@@ -249,6 +249,12 @@ if [[ -n "$PIDS" ]]; then
 fi
 
 launchctl bootout system/ro.alexd.CellularLTE.Helper 2>/dev/null || true
+
+# Ensure an upgrade cannot leave the old app/helper/network stack alive.
+rm -f "/Library/Application Support/CellularLTE/runtime-active"
+pkill -TERM -x Cellular 2>/dev/null || true
+sleep 0.5
+
 exit 0
 PREINSTALL
 
@@ -312,6 +318,7 @@ fi
 
 # Remove old per-user LaunchAgent for the current console user.
 CONSOLE_USER="$(stat -f '%Su' /dev/console 2>/dev/null || true)"
+MENU_WAS_DISABLED=0
 
 if [[ -n "$CONSOLE_USER" &&
       "$CONSOLE_USER" != "root" &&
@@ -319,6 +326,12 @@ if [[ -n "$CONSOLE_USER" &&
 
     USER_HOME="$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
     USER_UID="$(id -u "$CONSOLE_USER" 2>/dev/null || true)"
+
+    if [[ -n "$USER_UID" ]] &&
+       launchctl print-disabled "gui/$USER_UID" 2>/dev/null |
+         grep -q '"ro.alexd.CellularLTE.Menu" => true'; then
+        MENU_WAS_DISABLED=1
+    fi
 
     if [[ -n "$USER_HOME" ]]; then
         rm -f "$USER_HOME/Library/LaunchAgents/ro.alexd.CellularLTE.Menu.plist"
@@ -329,16 +342,24 @@ if [[ -n "$CONSOLE_USER" &&
     fi
 fi
 
-# Root helper.
+# Root helper is registered, but remains dormant until Cellular.app
+# creates runtime-active. This leaves no Cellular networking process
+# alive while the app is not running.
+rm -f "$SUPPORT/runtime-active"
 launchctl bootstrap system "$DAEMON" 2>/dev/null || true
 launchctl enable system/ro.alexd.CellularLTE.Helper
-launchctl kickstart -k system/ro.alexd.CellularLTE.Helper
 
 # /Library/LaunchAgents applies at login for all users.
+# Preserve a user's Launch at Login choice across package upgrades.
 if [[ -n "${USER_UID:-}" ]]; then
     launchctl bootstrap "gui/$USER_UID" "$AGENT" 2>/dev/null || true
-    launchctl enable "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
-    launchctl kickstart -k "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
+
+    if [[ "$MENU_WAS_DISABLED" == "1" ]]; then
+        launchctl disable "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
+    else
+        launchctl enable "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
+        launchctl kickstart -k "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
+    fi
 fi
 
 exit 0
