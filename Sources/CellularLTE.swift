@@ -36,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let engineLogPath = "/Library/Application Support/CellularLTE/engine.log"
     private let helperLogPath = "/Library/Application Support/CellularLTE/helper.log"
     private let runtimeMarkerPath = "/Library/Application Support/CellularLTE/runtime-active"
-    private let menuLaunchLabel = "ro.alexd.CellularLTE.Menu"
+    private let launchAtLoginKey = "LaunchAtLogin"
 
     private var statusItem: NSStatusItem!
 
@@ -553,62 +553,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
     }
 
-    private func runLaunchctl(
-        _ arguments: [String]
-    ) -> (status: Int32, output: String) {
-        let process = Process()
-        let pipe = Pipe()
-
-        process.executableURL =
-            URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = arguments
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            let data =
-                pipe.fileHandleForReading.readDataToEndOfFile()
-
-            let output =
-                String(data: data, encoding: .utf8) ?? ""
-
-            return (process.terminationStatus, output)
-        } catch {
-            return (127, error.localizedDescription)
-        }
-    }
-
     private func isLaunchAtLoginEnabled() -> Bool {
-        let domain = "gui/\(getuid())"
-
-        let result = runLaunchctl([
-            "print-disabled",
-            domain
-        ])
+        let defaults = UserDefaults.standard
 
         /*
-         * Daca launchctl nu poate raspunde, pastram comportamentul
-         * istoric: Launch at Login este considerat activ.
+         * Preserve the historic behavior for existing installations:
+         * if the preference has never been set, Launch at Login is ON.
          */
-        guard result.status == 0 else {
+        guard defaults.object(forKey: launchAtLoginKey) != nil else {
             return true
         }
 
-        let escaped =
-            NSRegularExpression.escapedPattern(
-                for: menuLaunchLabel
-            )
-
-        let pattern =
-            "\"\(escaped)\"\\s*=>\\s*true"
-
-        return result.output.range(
-            of: pattern,
-            options: .regularExpression
-        ) == nil
+        return defaults.bool(forKey: launchAtLoginKey)
     }
 
     private func refreshLaunchAtLoginState() {
@@ -617,22 +573,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleLaunchAtLogin() {
-        let enable = !isLaunchAtLoginEnabled()
+        let enabled = !isLaunchAtLoginEnabled()
 
-        let result = runLaunchctl([
-            enable ? "enable" : "disable",
-            "gui/\(getuid())/\(menuLaunchLabel)"
-        ])
+        UserDefaults.standard.set(
+            enabled,
+            forKey: launchAtLoginKey
+        )
 
-        if result.status != 0 {
-            showAlert(
-                title: "Launch at Login",
-                message:
-                    "Nu am putut schimba setarea:\n" +
-                    result.output
-            )
-        }
-
+        /*
+         * Flush immediately because the LaunchAgent wrapper reads the
+         * same preference domain at the next login.
+         */
+        UserDefaults.standard.synchronize()
         refreshLaunchAtLoginState()
     }
 

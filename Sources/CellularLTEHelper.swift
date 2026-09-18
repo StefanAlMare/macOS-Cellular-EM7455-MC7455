@@ -64,7 +64,7 @@ final class LinkState: @unchecked Sendable {
 }
 
 final class CellularLTEHelper {
-    private let version = "2.6.3-lifecycle-control"
+    private let version = "2.6.3.1-login-toggle-fix"
 
     private let supportDir = "/Library/Application Support/CellularLTE"
     private let commandsDir = "/Library/Application Support/CellularLTE/Commands"

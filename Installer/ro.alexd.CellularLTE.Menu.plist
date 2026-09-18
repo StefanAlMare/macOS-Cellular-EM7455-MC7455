@@ -8,9 +8,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/open</string>
-        <string>-g</string>
-        <string>/Applications/Cellular.app</string>
+        <string>/Library/Application Support/CellularLTE/launch-at-login.sh</string>
     </array>
 
     <key>RunAtLoad</key>

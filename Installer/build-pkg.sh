@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-VERSION="2.6.3"
+VERSION="2.6.3.1"
 PKG_ID="ro.alexd.Cellular"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$HERE/.." && pwd)"
@@ -205,6 +205,9 @@ cp "$HERE/diagnostic.sh" \
 cp "$HERE/startup-timing.sh" \
    "$ROOT/Library/Application Support/CellularLTE/startup-timing.sh"
 
+cp "$HERE/launch-at-login.sh" \
+   "$ROOT/Library/Application Support/CellularLTE/launch-at-login.sh"
+
 touch "$ROOT/Library/Application Support/CellularLTE/state.json"
 touch "$ROOT/Library/Application Support/CellularLTE/config"
 touch "$ROOT/Library/Application Support/CellularLTE/apn-cache.tsv"
@@ -218,7 +221,8 @@ chmod 755 \
   "$ROOT/Library/PrivilegedHelperTools/ro.alexd.CellularLTEHelper" \
   "$ROOT/Library/Application Support/CellularLTE/uninstall.sh" \
   "$ROOT/Library/Application Support/CellularLTE/diagnostic.sh" \
-  "$ROOT/Library/Application Support/CellularLTE/startup-timing.sh"
+  "$ROOT/Library/Application Support/CellularLTE/startup-timing.sh" \
+  "$ROOT/Library/Application Support/CellularLTE/launch-at-login.sh"
 
 chmod 644 \
   "$ROOT/Library/LaunchDaemons/ro.alexd.CellularLTE.Helper.plist" \
@@ -305,7 +309,8 @@ done
 chmod 0755 \
   "$SUPPORT/uninstall.sh" \
   "$SUPPORT/diagnostic.sh" \
-  "$SUPPORT/startup-timing.sh"
+  "$SUPPORT/startup-timing.sh" \
+  "$SUPPORT/launch-at-login.sh"
 
 if ! grep -q '^AUTO=' "$SUPPORT/config" 2>/dev/null; then
     echo "AUTO=1" > "$SUPPORT/config"
@@ -318,7 +323,6 @@ fi
 
 # Remove old per-user LaunchAgent for the current console user.
 CONSOLE_USER="$(stat -f '%Su' /dev/console 2>/dev/null || true)"
-MENU_WAS_DISABLED=0
 
 if [[ -n "$CONSOLE_USER" &&
       "$CONSOLE_USER" != "root" &&
@@ -326,12 +330,6 @@ if [[ -n "$CONSOLE_USER" &&
 
     USER_HOME="$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
     USER_UID="$(id -u "$CONSOLE_USER" 2>/dev/null || true)"
-
-    if [[ -n "$USER_UID" ]] &&
-       launchctl print-disabled "gui/$USER_UID" 2>/dev/null |
-         grep -q '"ro.alexd.CellularLTE.Menu" => true'; then
-        MENU_WAS_DISABLED=1
-    fi
 
     if [[ -n "$USER_HOME" ]]; then
         rm -f "$USER_HOME/Library/LaunchAgents/ro.alexd.CellularLTE.Menu.plist"
@@ -350,16 +348,13 @@ launchctl bootstrap system "$DAEMON" 2>/dev/null || true
 launchctl enable system/ro.alexd.CellularLTE.Helper
 
 # /Library/LaunchAgents applies at login for all users.
-# Preserve a user's Launch at Login choice across package upgrades.
+# The job itself stays enabled. The wrapper consults the per-user
+# LaunchAtLogin preference and opens Cellular.app only when requested.
+# Clear any stale launchctl disable override left by 2.6.3 test builds.
 if [[ -n "${USER_UID:-}" ]]; then
+    launchctl enable "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
     launchctl bootstrap "gui/$USER_UID" "$AGENT" 2>/dev/null || true
-
-    if [[ "$MENU_WAS_DISABLED" == "1" ]]; then
-        launchctl disable "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
-    else
-        launchctl enable "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
-        launchctl kickstart -k "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
-    fi
+    launchctl kickstart -k "gui/$USER_UID/ro.alexd.CellularLTE.Menu" 2>/dev/null || true
 fi
 
 exit 0
