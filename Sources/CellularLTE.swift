@@ -1,6 +1,7 @@
 
 import AppKit
 import Foundation
+import Darwin
 
 struct LTEState: Codable {
     let helperVersion: String
@@ -34,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statePath = "/Library/Application Support/CellularLTE/state.json"
     private let engineLogPath = "/Library/Application Support/CellularLTE/engine.log"
     private let helperLogPath = "/Library/Application Support/CellularLTE/helper.log"
+    private let runtimeMarkerPath = "/Library/Application Support/CellularLTE/runtime-active"
+    private let menuLaunchLabel = "ro.alexd.CellularLTE.Menu"
 
     private var statusItem: NSStatusItem!
 
@@ -49,12 +52,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var autoItem: NSMenuItem!
     private var connectItem: NSMenuItem!
     private var disconnectItem: NSMenuItem!
+    private var launchAtLoginItem: NSMenuItem!
 
     private var currentState: LTEState?
     private var timer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        activateRuntime()
 
         statusItem = NSStatusBar.system.statusItem(
             withLength: NSStatusItem.variableLength
@@ -157,8 +162,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let loginLine = disabledItem("Launch at login: Enabled")
-        menu.addItem(loginLine)
+        launchAtLoginItem = NSMenuItem(
+            title: "Launch at Login",
+            action: #selector(toggleLaunchAtLogin),
+            keyEquivalent: ""
+        )
+
+        launchAtLoginItem.target = self
+        menu.addItem(launchAtLoginItem)
+        refreshLaunchAtLoginState()
 
         let quitItem = NSMenuItem(
             title: "Quit Cellular",
@@ -187,6 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
          * pe main thread, deci pastram corectia de responsivitate v1.5.
          */
         refreshStatus()
+        refreshLaunchAtLoginState()
     }
 
     private func signalImage(bars: Int, known: Bool) -> NSImage {
@@ -508,6 +521,121 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+
+    func applicationWillTerminate(_ notification: Notification) {
+        deactivateRuntime()
+    }
+
+    private func activateRuntime() {
+        let payload = "\(getpid())\n"
+
+        do {
+            try payload.write(
+                toFile: runtimeMarkerPath,
+                atomically: true,
+                encoding: .utf8
+            )
+
+            _ = chmod(runtimeMarkerPath, 0o664)
+        } catch {
+            showAlert(
+                title: "Cellular helper unavailable",
+                message:
+                    "Nu pot activa serviciul Cellular:\n" +
+                    "\(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func deactivateRuntime() {
+        try? FileManager.default.removeItem(
+            atPath: runtimeMarkerPath
+        )
+    }
+
+    private func runLaunchctl(
+        _ arguments: [String]
+    ) -> (status: Int32, output: String) {
+        let process = Process()
+        let pipe = Pipe()
+
+        process.executableURL =
+            URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = arguments
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            let data =
+                pipe.fileHandleForReading.readDataToEndOfFile()
+
+            let output =
+                String(data: data, encoding: .utf8) ?? ""
+
+            return (process.terminationStatus, output)
+        } catch {
+            return (127, error.localizedDescription)
+        }
+    }
+
+    private func isLaunchAtLoginEnabled() -> Bool {
+        let domain = "gui/\(getuid())"
+
+        let result = runLaunchctl([
+            "print-disabled",
+            domain
+        ])
+
+        /*
+         * Daca launchctl nu poate raspunde, pastram comportamentul
+         * istoric: Launch at Login este considerat activ.
+         */
+        guard result.status == 0 else {
+            return true
+        }
+
+        let escaped =
+            NSRegularExpression.escapedPattern(
+                for: menuLaunchLabel
+            )
+
+        let pattern =
+            "\"\(escaped)\"\\s*=>\\s*true"
+
+        return result.output.range(
+            of: pattern,
+            options: .regularExpression
+        ) == nil
+    }
+
+    private func refreshLaunchAtLoginState() {
+        launchAtLoginItem?.state =
+            isLaunchAtLoginEnabled() ? .on : .off
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        let enable = !isLaunchAtLoginEnabled()
+
+        let result = runLaunchctl([
+            enable ? "enable" : "disable",
+            "gui/\(getuid())/\(menuLaunchLabel)"
+        ])
+
+        if result.status != 0 {
+            showAlert(
+                title: "Launch at Login",
+                message:
+                    "Nu am putut schimba setarea:\n" +
+                    result.output
+            )
+        }
+
+        refreshLaunchAtLoginState()
+    }
+
     @objc private func toggleAuto() {
         let enabled =
             !(currentState?.autoEnabled ?? false)
@@ -548,6 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func quitApp() {
+        deactivateRuntime()
         NSApp.terminate(nil)
     }
 
